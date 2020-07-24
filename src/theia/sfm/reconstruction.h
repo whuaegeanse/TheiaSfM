@@ -35,11 +35,18 @@
 #ifndef THEIA_SFM_RECONSTRUCTION_H_
 #define THEIA_SFM_RECONSTRUCTION_H_
 
+#include <cereal/access.hpp>
+#include <cereal/cereal.hpp>
+#include <cereal/types/string.hpp>
+#include <cereal/types/unordered_map.hpp>
+#include <stdint.h>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include "theia/sfm/feature.h"
 #include "theia/sfm/track.h"
 #include "theia/sfm/types.h"
 #include "theia/sfm/view.h"
@@ -66,12 +73,15 @@ class Reconstruction {
   // exist.
   ViewId ViewIdFromName(const std::string& view_name) const;
 
-  // Creates a new view and returns the view id. If the view
+  // Creates a new view and returns the view id.
   ViewId AddView(const std::string& view_name);
+  // Creates a new view and assigns it to the specified camera intrinsics group.
+  ViewId AddView(const std::string& view_name,
+                 const CameraIntrinsicsGroupId group_id);
 
   // Removes the view from the reconstruction and removes all references to the
   // view in the tracks. Any tracks that have zero views after this view is
-  // removed are alsoremoved.
+  // removed are also removed.
   bool RemoveView(const ViewId view_id);
   int NumViews() const;
 
@@ -81,6 +91,32 @@ class Reconstruction {
 
   // Return all ViewIds in the reconstruction.
   std::vector<ViewId> ViewIds() const;
+
+  // Get the camera intrinsics group id for the view id.
+  CameraIntrinsicsGroupId CameraIntrinsicsGroupIdFromViewId(
+      const ViewId view_id) const;
+
+  // Return all view ids with the given camera intrinsics group id. If an
+  // invalid or non-existant group is chosen then an empty set will be returned.
+  std::unordered_set<ViewId> GetViewsInCameraIntrinsicGroup(
+      const CameraIntrinsicsGroupId group_id) const;
+  int NumCameraIntrinsicGroups() const;
+
+  // Returns all group ids.
+  std::unordered_set<CameraIntrinsicsGroupId> CameraIntrinsicsGroupIds() const;
+
+  // Adds an empty track to the reconstruction. Note that this assumes that the
+  // user will manage the visibility of the track.
+  TrackId AddTrack();
+
+  // Adds an observation between the track and the view to the
+  // reconstruction. Returns true upon successful insertion of the
+  // observation. If the track already contains an observation to this view then
+  // false is returned. If the view/track does not exist, or another failure is
+  // encountered then a failure is thrown.
+  bool AddObservation(const ViewId view_id,
+                      const TrackId track_id,
+                      const Feature& feature);
 
   // Add a new track to the reconstruction. If successful, the new track id is
   // returned. Failure results when multiple features from the same image are
@@ -109,15 +145,43 @@ class Reconstruction {
   // Ceres Solver.
   void Normalize();
 
+  // Obtain a sub-reconstruction which only contains the specified views and
+  // corresponding tracks observed by those views. All views and tracks maintain
+  // the same IDs as the original reconstruction.
+  void GetSubReconstruction(const std::unordered_set<ViewId>& views_in_subset,
+                            Reconstruction* subreconstruction) const;
+
  private:
+  // Templated method for disk I/O with cereal. This method tells cereal which
+  // data members should be used when reading/writing to/from disk.
+  friend class cereal::access;
+  template <class Archive>
+  void serialize(Archive& ar, const std::uint32_t version) {  // NOLINT
+    ar(next_track_id_,
+       next_view_id_,
+       view_name_to_id_,
+       views_,
+       tracks_,
+       view_id_to_camera_intrinsics_group_id_,
+       camera_intrinsics_groups_);
+  }
+
   TrackId next_track_id_;
   ViewId next_view_id_;
+  CameraIntrinsicsGroupId next_camera_intrinsics_group_id_;
 
   std::unordered_map<std::string, ViewId> view_name_to_id_;
   std::unordered_map<ViewId, class View> views_;
   std::unordered_map<TrackId, class Track> tracks_;
+
+  std::unordered_map<ViewId, CameraIntrinsicsGroupId>
+      view_id_to_camera_intrinsics_group_id_;
+  std::unordered_map<CameraIntrinsicsGroupId, std::unordered_set<ViewId> >
+      camera_intrinsics_groups_;
 };
 
 }  // namespace theia
+
+CEREAL_CLASS_VERSION(theia::Reconstruction, 0);
 
 #endif  // THEIA_SFM_RECONSTRUCTION_H_

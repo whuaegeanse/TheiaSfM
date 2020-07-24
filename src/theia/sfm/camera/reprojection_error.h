@@ -36,44 +36,62 @@
 #define THEIA_SFM_CAMERA_REPROJECTION_ERROR_H_
 
 #include <ceres/ceres.h>
+#include <ceres/rotation.h>
 #include "theia/sfm/feature.h"
 #include "theia/sfm/camera/camera.h"
-#include "theia/sfm/camera/project_point_to_image.h"
+#include "theia/sfm/camera/pinhole_camera_model.h"
 
 namespace theia {
 
+template <class CameraModel>
 struct ReprojectionError {
  public:
   explicit ReprojectionError(const Feature& feature) : feature_(feature) {}
 
-  template<typename T> bool operator()(const T* camera_parameters,
-                                       const T* point_parameters,
-                                       T* reprojection_error) const {
-    // Do not evaluate invalid camera configurations.
-    if (camera_parameters[Camera::kExtrinsicsSize + Camera::FOCAL_LENGTH] <
-            T(0.0) ||
-        camera_parameters[Camera::kExtrinsicsSize + Camera::ASPECT_RATIO] <
-            T(0.0)) {
+  template <typename T>
+  bool operator()(const T* extrinsic_parameters,
+                  const T* intrinsic_parameters,
+                  const T* point,
+                  T* reprojection_error) const {
+    typedef Eigen::Matrix<T, 3, 1> Matrix3T;
+    typedef Eigen::Map<const Matrix3T> ConstMap3T;
+
+    static const T kVerySmallNumber(1e-8);
+
+    // Remove the translation.
+    Eigen::Matrix<T, 3, 1> adjusted_point =
+        ConstMap3T(point) -
+        point[3] * ConstMap3T(extrinsic_parameters + Camera::POSITION);
+
+    // If the point is too close to the camera center then the point cannot be
+    // constrained by triangulation. This is likely to only occur when a 3d
+    // point is seen by 2 views and the camera center of 1 view lies on or neare
+    // the optical axis of the other view.
+    //
+    // Since we do not know the camera model we cannot say that the point must
+    // be in front of the camera (e.g., wide angle cameras that have > 180
+    // degree FOV). Instead we simply force that the point is not near the
+    // camera center.
+    if (adjusted_point.squaredNorm() < kVerySmallNumber) {
       return false;
     }
 
-    T reprojection[2];
-    ProjectPointToImage(camera_parameters,
-                        camera_parameters + Camera::kExtrinsicsSize,
-                        point_parameters,
-                        reprojection);
-    reprojection_error[0] = reprojection[0] - T(feature_.x());
-    reprojection_error[1] = reprojection[1] - T(feature_.y());
-    return true;
-  }
+    // Rotate the point to obtain the point in the camera coordinate system.
+    T rotated_point[3];
+    ceres::AngleAxisRotatePoint(extrinsic_parameters + Camera::ORIENTATION,
+                                adjusted_point.data(),
+                                rotated_point);
 
-  static ceres::CostFunction* Create(const Feature& feature) {
-    static const int kPointSize = 4;
-    return new ceres::AutoDiffCostFunction<ReprojectionError,
-                                           2,
-                                           Camera::kParameterSize,
-                                           kPointSize>(
-        new ReprojectionError(feature));
+    // Apply the camera intrinsics to get the reprojected pixel.
+    T reprojection[2];
+    CameraModel::CameraToPixelCoordinates(intrinsic_parameters,
+                                          rotated_point,
+                                          reprojection);
+
+    // Compute the reprojection error.
+    reprojection_error[0] = reprojection[0] - feature_.x();
+    reprojection_error[1] = reprojection[1] - feature_.y();
+    return true;
   }
 
  private:

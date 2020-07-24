@@ -32,79 +32,73 @@
 // Please contact the author of this library if you have any questions.
 // Author: Chris Sweeney (cmsweeney@cs.ucsb.edu)
 
-#include <glog/logging.h>
-#include <gflags/gflags.h>
-#include <time.h>
-#include <theia/theia.h>
 #include <chrono>  // NOLINT
+#include <gflags/gflags.h>
+#include <glog/logging.h>
 #include <string>
+#include <theia/theia.h>
+#include <time.h>
 #include <vector>
+
+#include "applications/command_line_helpers.h"
 
 // Input/output files.
 DEFINE_string(images, "", "Wildcard of images to reconstruct.");
-DEFINE_string(calibration_file, "",
+DEFINE_string(calibration_file,
+              "",
               "Calibration file containing image calibration data.");
-DEFINE_string(
-    output_matches_file, "",
-    "File to write the two-view matches to. This file can be used in "
-    "future iterations as input to the reconstruction builder. Leave empty if "
-    "you do not want to output matches.");
-DEFINE_int32(num_threads, 1,
+DEFINE_string(feature_matches_db_directory,
+              "",
+              "DB to write the two-view matches to. This file can be used in "
+              "future iterations as input to the reconstruction builder.");
+DEFINE_int32(num_threads,
+             1,
              "Number of threads to use for feature extraction and matching.");
 
 // Feature and matching options.
 DEFINE_string(
-    descriptor, "SIFT",
+    descriptor,
+    "SIFT",
     "Type of feature descriptor to use. Must be one of the following: "
-    "SIFT, BRIEF, BRISK, FREAK");
-DEFINE_string(matching_strategy, "BRUTE_FORCE",
+    "SIFT");
+DEFINE_string(feature_density,
+              "NORMAL",
+              "Set to SPARSE, NORMAL, or DENSE to extract fewer or more "
+              "features from each image.");
+DEFINE_string(matching_strategy,
+              "CASCADE_HASHING",
               "Strategy used to match features. Must be BRUTE_FORCE, "
               "or CASCADE_HASHING");
-DEFINE_double(lowes_ratio, 0.8, "Lowes ratio used for feature matching.");
+DEFINE_double(lowes_ratio, 0.75, "Lowes ratio used for feature matching.");
 DEFINE_double(
-    max_sampson_error_for_verified_match, 4.0,
+    max_sampson_error_for_verified_match,
+    4.0,
     "Maximum sampson error for a match to be considered geometrically valid.");
-DEFINE_int32(min_num_inliers_for_valid_match, 30,
+DEFINE_double(max_reprojection_error_pixels,
+              4.0,
+              "Maximum reprojection error for a correspondence to be "
+              "considered an inlier after two-view bundle adjustment.");
+DEFINE_double(triangulation_reprojection_error_pixels,
+              15.0,
+              "Max allowable reprojection error on initial two-view "
+              "triangulation of points.");
+DEFINE_int32(min_num_inliers_for_valid_match,
+             30,
              "Minimum number of geometrically verified inliers that a pair on "
              "images must have in order to be considered a valid two-view "
              "match.");
-DEFINE_bool(bundle_adjust_two_view_geometry, true,
+DEFINE_bool(bundle_adjust_two_view_geometry,
+            true,
             "Set to false to turn off 2-view BA.");
+DEFINE_double(min_triangulation_angle_degrees,
+              4.0,
+              "Minimum angle between views for triangulation.");
 
 using theia::DescriptorExtractorType;
 using theia::MatchingStrategy;
 using theia::Reconstruction;
 using theia::ReconstructionBuilder;
 using theia::ReconstructionBuilderOptions;
-
-DescriptorExtractorType GetDescriptorExtractorType(
-    const std::string& descriptor) {
-  if (descriptor == "SIFT") {
-    return DescriptorExtractorType::SIFT;
-  } else if (descriptor == "BRIEF") {
-    return DescriptorExtractorType::BRIEF;
-  } else if (descriptor == "BRISK") {
-    return DescriptorExtractorType::BRISK;
-  } else if (descriptor == "FREAK") {
-    return DescriptorExtractorType::FREAK;
-  } else {
-    LOG(ERROR) << "Invalid DescriptorExtractor specified. Using SIFT instead.";
-    return DescriptorExtractorType::SIFT;
-  }
-}
-
-MatchingStrategy GetMatchingStrategyType(
-    const std::string& matching_strategy) {
-  if (matching_strategy == "BRUTE_FORCE") {
-    return MatchingStrategy::BRUTE_FORCE;
-  } else if (matching_strategy == "CASCADE_HASHING") {
-    return MatchingStrategy::CASCADE_HASHING;
-  } else {
-    LOG(ERROR)
-        << "Invalid matching strategy specified. Using BRUTE_FORCE instead.";
-    return MatchingStrategy::BRUTE_FORCE;
-  }
-}
 
 // Sets the feature extraction, matching, and reconstruction options based on
 // the command line flags. There are many more options beside just these located
@@ -113,16 +107,25 @@ ReconstructionBuilderOptions SetReconstructionBuilderOptions() {
   ReconstructionBuilderOptions options;
   options.num_threads = FLAGS_num_threads;
   options.reconstruction_estimator_options.num_threads = FLAGS_num_threads;
-  options.output_matches_file = FLAGS_output_matches_file;
 
-  options.descriptor_type = GetDescriptorExtractorType(FLAGS_descriptor);
-  options.matching_strategy = GetMatchingStrategyType(FLAGS_matching_strategy);
+  options.descriptor_type = StringToDescriptorExtractorType(FLAGS_descriptor);
+  options.feature_density = StringToFeatureDensity(FLAGS_feature_density);
+  options.matching_strategy =
+      StringToMatchingStrategyType(FLAGS_matching_strategy);
   options.matching_options.lowes_ratio = FLAGS_lowes_ratio;
   options.min_num_inlier_matches = FLAGS_min_num_inliers_for_valid_match;
-  options.geometric_verification_options.estimate_twoview_info_options
-      .max_sampson_error_pixels = FLAGS_max_sampson_error_for_verified_match;
-  options.geometric_verification_options.bundle_adjustment =
+  options.matching_options.geometric_verification_options
+      .estimate_twoview_info_options.max_sampson_error_pixels =
+      FLAGS_max_sampson_error_for_verified_match;
+  options.matching_options.geometric_verification_options.bundle_adjustment =
       FLAGS_bundle_adjust_two_view_geometry;
+  options.matching_options.geometric_verification_options
+      .triangulation_max_reprojection_error =
+      FLAGS_triangulation_reprojection_error_pixels;
+  options.matching_options.geometric_verification_options
+      .min_triangulation_angle_degrees = FLAGS_min_triangulation_angle_degrees;
+  options.matching_options.geometric_verification_options
+      .final_max_reprojection_error = FLAGS_max_reprojection_error_pixels;
 
   return options;
 }
@@ -160,14 +163,17 @@ void AddImagesToReconstructionBuilder(
   CHECK(reconstruction_builder->ExtractAndMatchFeatures());
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char* argv[]) {
   THEIA_GFLAGS_NAMESPACE::ParseCommandLineFlags(&argc, &argv, true);
   google::InitGoogleLogging(argv[0]);
 
   const ReconstructionBuilderOptions options =
       SetReconstructionBuilderOptions();
 
-  ReconstructionBuilder reconstruction_builder(options);
+  theia::RocksDbFeaturesAndMatchesDatabase matches_db(
+      FLAGS_feature_matches_db_directory);
+
+  ReconstructionBuilder reconstruction_builder(options, &matches_db);
   AddImagesToReconstructionBuilder(&reconstruction_builder);
-  LOG(INFO) << "Wrote matches out to " << FLAGS_output_matches_file;
+  LOG(INFO) << "Wrote matches out to " << FLAGS_feature_matches_db_directory;
 }

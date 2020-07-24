@@ -63,21 +63,22 @@ static const double kReprojectionError = 4.0;
 static const double kErrorThreshold =
     (kReprojectionError * kReprojectionError) / (kFocalLength * kFocalLength);
 
+RandomNumberGenerator rng(66);
+
 void ExecuteRandomTest(const RansacParameters& options,
                        const Matrix3d& rotation,
                        const Vector3d& position,
                        const double inlier_ratio,
                        const double noise,
                        const double tolerance) {
-  InitRandomGenerator();
-
   // Create feature correspondences (inliers and outliers) and add noise if
   // appropriate.
   std::vector<FeatureCorrespondence2D3D> correspondences;
   for (int i = 0; i < kNumPoints; i++) {
     FeatureCorrespondence2D3D correspondence;
-    correspondence.world_point = Vector3d(
-        RandDouble(-2.0, 2.0), RandDouble(-2.0, 2.0), RandDouble(6.0, 10.0));
+    correspondence.world_point = Vector3d(rng.RandDouble(-2.0, 2.0),
+                                          rng.RandDouble(-2.0, 2.0),
+                                          rng.RandDouble(6.0, 10.0));
 
     // Add an inlier or outlier.
     if (i < inlier_ratio * kNumPoints) {
@@ -85,14 +86,14 @@ void ExecuteRandomTest(const RansacParameters& options,
       correspondence.feature =
           (rotation * (correspondence.world_point - position)).hnormalized();
     } else {
-      correspondence.feature = Vector2d::Random();
+      correspondence.feature = rng.RandVector2d();
     }
     correspondences.emplace_back(correspondence);
   }
 
   if (noise) {
     for (int i = 0; i < kNumPoints; i++) {
-      AddNoiseToProjection(noise / kFocalLength, &correspondences[i].feature);
+      AddNoiseToProjection(noise / kFocalLength, &rng, &correspondences[i].feature);
     }
   }
 
@@ -121,6 +122,7 @@ void ExecuteRandomTest(const RansacParameters& options,
 
 TEST(EstimateCalibratedAbsolutePose, AllInliersNoNoise) {
   RansacParameters options;
+  options.rng = std::make_shared<RandomNumberGenerator>(rng);
   options.use_mle = true;
   options.error_thresh = kErrorThreshold;
   options.failure_probability = 0.001;
@@ -150,6 +152,7 @@ TEST(EstimateCalibratedAbsolutePose, AllInliersNoNoise) {
 
 TEST(EstimateCalibratedAbsolutePose, AllInliersWithNoise) {
   RansacParameters options;
+  options.rng = std::make_shared<RandomNumberGenerator>(rng);
   options.use_mle = true;
   options.error_thresh = kErrorThreshold;
   options.failure_probability = 0.001;
@@ -180,6 +183,7 @@ TEST(EstimateCalibratedAbsolutePose, AllInliersWithNoise) {
 
 TEST(EstimateCalibratedAbsolutePose, OutliersNoNoise) {
   RansacParameters options;
+  options.rng = std::make_shared<RandomNumberGenerator>(rng);
   options.use_mle = true;
   options.error_thresh = kErrorThreshold;
   options.failure_probability = 0.001;
@@ -187,10 +191,8 @@ TEST(EstimateCalibratedAbsolutePose, OutliersNoNoise) {
   const double kNoise = 0.0;
   const double kPoseTolerance = 1e-2;
 
-  const std::vector<Matrix3d> rotations = {
-    Matrix3d::Identity(),
-    ProjectToRotationMatrix(Matrix3d::Identity() + 0.3 * Matrix3d::Random())
-  };
+  const std::vector<Matrix3d> rotations = {Matrix3d::Identity(),
+                                           RandomRotation(10.0, &rng)};
   const std::vector<Vector3d> positions = { Vector3d(1, 0, 0),
                                             Vector3d(0, 1, 0) };
 
@@ -208,6 +210,7 @@ TEST(EstimateCalibratedAbsolutePose, OutliersNoNoise) {
 
 TEST(EstimateCalibratedAbsolutePose, OutliersWithNoise) {
   RansacParameters options;
+  options.rng = std::make_shared<RandomNumberGenerator>(rng);
   options.use_mle = true;
   options.error_thresh = kErrorThreshold;
   options.failure_probability = 0.001;
@@ -215,12 +218,10 @@ TEST(EstimateCalibratedAbsolutePose, OutliersWithNoise) {
   const double kNoise = 1.0;
   const double kPoseTolerance = 1e-2;
 
-  const std::vector<Matrix3d> rotations = {
-    Matrix3d::Identity(),
-    ProjectToRotationMatrix(Matrix3d::Identity() + 0.3 * Matrix3d::Random())
-  };
-  const std::vector<Vector3d> positions = { Vector3d(1, 0, 0),
-                                            Vector3d(0, 1, 0) };
+  const std::vector<Matrix3d> rotations = {Matrix3d::Identity(),
+                                           RandomRotation(10.0, &rng)};
+  const std::vector<Vector3d> positions = {Vector3d(1, 0, 0),
+                                           Vector3d(0, 1, 0)};
 
   for (int i = 0; i < rotations.size(); i++) {
     for (int j = 0; j < positions.size(); j++) {

@@ -39,17 +39,26 @@
 #include <vector>
 
 namespace theia {
+class RandomNumberGenerator;
 
 // Adds noise to the 3D point passed in.
-void AddNoiseToPoint(const double noise_factor, Eigen::Vector3d* point);
+void AddNoiseToPoint(const double noise_factor,
+                     RandomNumberGenerator* rng,
+                     Eigen::Vector3d* point);
 
 // Adds noise to the ray i.e. the projection of the point.
-void AddNoiseToProjection(const double noise_factor, Eigen::Vector2d* point);
+void AddNoiseToProjection(const double noise_factor,
+                          RandomNumberGenerator* rng,
+                          Eigen::Vector2d* point);
 
 // Adds noise to the image ray.
-void AddNoiseToRay(const double std_dev, Eigen::Vector3d* proj);
+void AddNoiseToRay(const double std_dev,
+                   RandomNumberGenerator* rng,
+                   Eigen::Vector3d* proj);
 
-void AddGaussianNoise(const double noise_factor, Eigen::Vector3d* ray);
+void AddGaussianNoise(const double noise_factor,
+                      RandomNumberGenerator* rng,
+                      Eigen::Vector3d* ray);
 
 // Creates points that are randomly distributed within a viewing frustum.
 void CreateRandomPointsInFrustum(const double near_plane_width,
@@ -57,7 +66,13 @@ void CreateRandomPointsInFrustum(const double near_plane_width,
                                  const double near_plane_depth,
                                  const double far_plane_depth,
                                  const int num_points,
+                                 RandomNumberGenerator* rng,
                                  std::vector<Eigen::Vector3d>* random_points);
+
+// Constructs a random rotation matrix that is within max_degrees_from_identity
+// of the identity rotation.
+Eigen::Matrix3d RandomRotation(const double max_degrees_from_identity,
+                               RandomNumberGenerator* rng);
 }  // namespace theia
 
 #endif  // THEIA_SFM_POSE_TEST_UTIL_H_

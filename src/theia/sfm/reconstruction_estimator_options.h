@@ -35,18 +35,65 @@
 #ifndef THEIA_SFM_RECONSTRUCTION_ESTIMATOR_OPTIONS_H_
 #define THEIA_SFM_RECONSTRUCTION_ESTIMATOR_OPTIONS_H_
 
+#include <memory>
+
+#include "theia/sfm/bundle_adjustment/bundle_adjustment.h"
+#include "theia/sfm/global_pose_estimation/least_unsquared_deviation_position_estimator.h"
+#include "theia/sfm/global_pose_estimation/linear_position_estimator.h"
+#include "theia/sfm/global_pose_estimation/nonlinear_position_estimator.h"
+#include "theia/util/random.h"
+
 namespace theia {
 
+// Global SfM methods are considered to be more scalable while incremental SfM
+// is less scalable but often more robust.
 enum class ReconstructionEstimatorType {
+  GLOBAL = 0,
+  INCREMENTAL = 1,
+  HYBRID = 2
+};
+
+// The recommended type of rotations solver is the Robust L1-L2 method. This
+// method is scalable, extremely accurate, and very efficient. See the
+// global_pose_estimation directory for more details.
+enum class GlobalRotationEstimatorType {
+  ROBUST_L1L2 = 0,
+  NONLINEAR = 1,
+  LINEAR = 2
+};
+
+// Global position estimation methods.
+//   NONLINEAR: This method minimizes the nonlinear pairwise translation
+//     constraint to solve for positions.
+//   LINEAR_TRIPLET: This linear method computes camera positions by
+//     minimizing an error for image triplets. Essentially, it tries to
+//     enforce a loop/triangle constraint for triplets.
+//   LEAST_UNSQUARED_DEVIATION: This robust method uses the least unsquared
+//     deviation instead of least squares. It is essentially an L1 solver.
+enum class GlobalPositionEstimatorType {
   NONLINEAR = 0,
-  INCREMENTAL = 1
+  LINEAR_TRIPLET = 1,
+  LEAST_UNSQUARED_DEVIATION = 2,
 };
 
 // Options for the reconstruction estimation.
 struct ReconstructionEstimatorOptions {
   // Type of reconstruction estimation to use.
   ReconstructionEstimatorType reconstruction_estimator_type =
-      ReconstructionEstimatorType::NONLINEAR;
+      ReconstructionEstimatorType::GLOBAL;
+
+  // If Global SfM is desired, which type of rotation and position estimation
+  // methods are used.
+  GlobalRotationEstimatorType global_rotation_estimator_type =
+      GlobalRotationEstimatorType::ROBUST_L1L2;
+
+  GlobalPositionEstimatorType global_position_estimator_type =
+      GlobalPositionEstimatorType::LEAST_UNSQUARED_DEVIATION;
+
+  // The random number generator used to generate random numbers through the
+  // reconstruction estimation process. If this is a nullptr then the random
+  // generator will be initialized based on the current time.
+  std::shared_ptr<RandomNumberGenerator> rng;
 
   // Number of threads to use.
   int num_threads = 1;
@@ -58,15 +105,6 @@ struct ReconstructionEstimatorOptions {
   // Any edges in the view graph with fewer than min_num_two_view_inliers will
   // be removed as an initial filtering step.
   int min_num_two_view_inliers = 30;
-
-  // After computing a model and performing an initial BA, the reconstruction
-  // can be further improved (and even densified) if we attempt (again) to
-  // retriangulate any tracks that are currently unestimated. For each
-  // retriangulation iteration we do the following:
-  //   1. Remove features that are above max_reprojection_error_in_pixels.
-  //   2. Triangulate all unestimated tracks.
-  //   3. Perform full bundle adjustment.
-  int num_retriangulation_iterations = 1;
 
   // --------------- RANSAC Options --------------- //
   double ransac_confidence = 0.9999;
@@ -90,26 +128,41 @@ struct ReconstructionEstimatorOptions {
   // estimation.
   bool refine_relative_translations_after_rotation_estimation = true;
 
+  // If true, the maximal rigid component of the viewing graph will be
+  // extracted. This means that only the cameras that are well-constrained for
+  // position estimation will be used. This method is somewhat slow, so enabling
+  // it will cause a performance hit in terms of efficiency.
+  //
+  // NOTE: This method does not attempt to remove outlier 2-view geometries, it
+  // only determines which cameras are well-conditioned for position estimation.
+  bool extract_maximal_rigid_subgraph = false;
+
+  // If true, filter the pairwise translation estimates to remove potentially
+  // bad relative poses. Removing potential outliers can increase the
+  // performance of position estimation.
+  bool filter_relative_translations_with_1dsfm = true;
+
   // Before the camera positions are estimated, it is wise to remove any
   // relative translations estimates that are low quality. See
   // theia/sfm/filter_view_pairs_from_relative_translation.h
   int translation_filtering_num_iterations = 48;
   double translation_filtering_projection_tolerance = 0.1;
 
-  // --------------- Nonlinear Rotation Estimation Options --------------- //
+  // --------------- Global Rotation Estimation Options --------------- //
 
   // Robust loss function scales for nonlinear estimation.
   double rotation_estimation_robust_loss_scale = 0.1;
 
-  // --------------- Nonlinear Position Estimation Options --------------- //
-  double position_estimation_robust_loss_scale = 1.0;
+  // --------------- Global Position Estimation Options --------------- //
+  NonlinearPositionEstimator::Options nonlinear_position_estimator_options;
+  LinearPositionEstimator::Options linear_triplet_position_estimator_options;
+  LeastUnsquaredDeviationPositionEstimator::Options
+      least_unsquared_deviation_position_estimator_options;
 
-  // Number of point to camera correspondences used for nonlinear position
-  // estimation.
-  int position_estimation_min_num_tracks_per_view = 10;
-  // Weight of point to camera constraints with respect to camera to camera
-  // constraints.
-  double position_estimation_point_to_camera_weight = 0.5;
+  // For global SfM it may be advantageous to run a partial bundle adjustment
+  // optimizing only the camera positions and 3d points while holding camera
+  // orientation and intrinsics constant.
+  bool refine_camera_positions_and_points_after_position_estimation = true;
 
   // --------------------- Incremental SfM Options --------------------- //
 
@@ -122,7 +175,12 @@ struct ReconstructionEstimatorOptions {
   // When adding a new view to the current reconstruction, this is the
   // reprojection error that determines whether a 2D-3D correspondence is an
   // inlier during localization.
-  double absolute_pose_reprojection_error_threshold = 8.0;
+  //
+  // NOTE: This threshold is with respect to an image that is 1024 pixels
+  // wide. If the image dimensions are larger or smaller than this value then
+  // the threshold will be appropriately scaled. This allows us to use a single
+  // threshold for images that have varying resolutions.
+  double absolute_pose_reprojection_error_threshold = 4.0;
 
   // Minimum number of inliers for absolute pose estimation to be considered
   // successful.
@@ -141,6 +199,15 @@ struct ReconstructionEstimatorOptions {
   // controls how many views should be part of the partial BA.
   int partial_bundle_adjustment_num_views = 20;
 
+  // --------------------- Hybrid SfM Options --------------------- //
+
+  // The relative position of the initial pair used for the incremental portion
+  // of hybrid sfm is re-estimated using a simplified relative translations
+  // solver (assuming known rotation). The relative position is re-estimated
+  // using a RANSAC procedure with the inlier threshold defined by this
+  // parameter.
+  double relative_position_estimation_max_sampson_error_pixels = 4.0;
+
   // --------------- Triangulation Options --------------- //
 
   // Minimum angle required between a 3D point and 2 viewing rays in order to
@@ -149,18 +216,88 @@ struct ReconstructionEstimatorOptions {
 
   // The reprojection error to use for determining valid triangulation.
   double triangulation_max_reprojection_error_in_pixels = 10.0;
+
   // Bundle adjust a track immediately after estimating it.
   bool bundle_adjust_tracks = true;
 
   // --------------- Bundle Adjustment Options --------------- //
+
+  // After computing a model and performing an initial BA, the reconstruction
+  // can be further improved (and even densified) if we attempt (again) to
+  // retriangulate any tracks that are currently unestimated. For each
+  // retriangulation iteration we do the following:
+  //   1. Remove features that are above max_reprojection_error_in_pixels.
+  //   2. Triangulate all unestimated tracks.
+  //   3. Perform full bundle adjustment.
+  //
+  // NOTE: This is only utilized in the Global SfM module.
+  int num_retriangulation_iterations = 1;
+
+
+  // For bundle adjustment, we may want to use a robust loss function to improve
+  // robustness to outliers. The various types of robust loss functions used can
+  // be found at //theia/sfm/bundle_adjustment/create_loss_function.h
+  LossFunctionType bundle_adjustment_loss_function_type =
+      LossFunctionType::TRIVIAL;
+
+  // For robust loss functions, the robustness will begin for values that have
+  // an error greater than this value. For example, Tukey loss will have a
+  // constant loss when the error values are greater than this.
+  double bundle_adjustment_robust_loss_width = 10.0;
 
   // Use SPARSE_SCHUR for problems smaller than this size and ITERATIVE_SCHUR
   // for problems larger than this size.
   int min_cameras_for_iterative_solver = 1000;
 
   // If accurate calibration is known ahead of time then it is recommended to
-  // set the camera intrinsics constant during bundle adjustment.
-  bool constant_camera_intrinsics = false;
+  // set the camera intrinsics constant during bundle adjustment. Othewise, you
+  // can choose which intrinsics to optimize. See
+  // //theia/sfm/bundle_adjustment_options.h for full details.
+  OptimizeIntrinsicsType intrinsics_to_optimize =
+      OptimizeIntrinsicsType::FOCAL_LENGTH |
+      OptimizeIntrinsicsType::RADIAL_DISTORTION;
+
+  // --------------- Track Subsampling Options --------------- //
+
+  // Bundle adjustment performs joint nonlinear optimization of point positions
+  // and camera poses by minimizing reprojection error. For many scenes, the 3d
+  // points can be highly redundant such that adding more points only marginally
+  // improves the reconstruction quality (if at all) despite a large increase in
+  // runtime. As such, we can reduce the number of 3d points used in bundle
+  // adjustment and still achieve similar or even better quality reconstructions
+  // by carefully choosing the points such that they properly constrain the
+  // optimization.
+  //
+  // If subsampling the tracks is set to true, then the 3d points are chosen
+  // such that they fit the following criteria:
+  //
+  //    a) High confidence (i.e. low reprojection error).
+  //    b) Long tracks are preferred.
+  //    c) The tracks used for optimization provide a good spatial coverage in
+  //       each image.
+  //    d) Each view observes at least K optimized tracks.
+  //
+  // Tracks are selected to optimize for these criteria using the thresholds
+  // below.
+  bool subsample_tracks_for_bundle_adjustment = false;
+
+  // Long tracks are preferred during the track subsampling, but csweeney has
+  // observed that long tracks often are more likely to contain outlier. Thus,
+  // we cap the track length for track selection at 10 then sort tracks first by
+  // the truncated track length, then secondarily by their mean reprojection
+  // error. This allows us to choose the high quality tracks among all the long
+  // tracks.
+  int track_subset_selection_long_track_length_threshold = 10;
+
+  // To satisfy c) above, we divide each image into an image grid with grid cell
+  // widths specified by this threshold. The top ranked track in each grid cell
+  // is chosen to be optimized so that each image has a good spatial coverage.
+  int track_selection_image_grid_cell_size_pixels = 100;
+
+  // The minimum number of optimized tracks required for each view when using
+  // track subsampling. If the view does not observe this many tracks, then all
+  // tracks in the view are optimized.
+  int min_num_optimized_tracks_per_view = 200;
 };
 
 }  // namespace theia

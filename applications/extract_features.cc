@@ -34,41 +34,28 @@
 
 #include <glog/logging.h>
 #include <gflags/gflags.h>
-#include <time.h>
 #include <theia/theia.h>
-#include <chrono>
 #include <string>
 #include <vector>
 
+#include "applications/command_line_helpers.h"
+
 DEFINE_string(
-    input_imgs, "",
+    input_images, "",
     "Filepath of the images you want to extract features and compute matches "
-    "for. The filepath should be a wildcard to match multiple images.");
-DEFINE_string(
-    img_output_dir, ".",
-    "Name of output image directory. No trailing slash should be given.");
+    "for. The filepath should be a wildcard to extract features from multiple "
+    "images.");
+DEFINE_string(features_output_directory, ".",
+              "Name of output directory to write the features files.");
 DEFINE_int32(num_threads, 1,
              "Number of threads to use for feature extraction and matching.");
 DEFINE_string(
     descriptor, "SIFT",
     "Type of feature descriptor to use. Must be one of the following: "
-    "SIFT, BRIEF, BRISK, FREAK");
-
-theia::DescriptorExtractorType GetDescriptorExtractorType(
-    const std::string& descriptor) {
-  if (descriptor == "SIFT") {
-    return theia::DescriptorExtractorType::SIFT;
-  } else if (descriptor == "BRIEF") {
-    return theia::DescriptorExtractorType::BRIEF;
-  } else if (descriptor == "BRISK") {
-    return theia::DescriptorExtractorType::BRISK;
-  } else if (descriptor == "FREAK") {
-    return theia::DescriptorExtractorType::FREAK;
-  } else {
-    LOG(ERROR) << "Invalid DescriptorExtractor specified. Using SIFT instead.";
-    return theia::DescriptorExtractorType::SIFT;
-  }
-}
+    "SIFT");
+DEFINE_string(feature_density, "NORMAL",
+              "Set to SPARSE, NORMAL, or DENSE to extract fewer or more "
+              "features from each image.");
 
 int main(int argc, char *argv[]) {
   THEIA_GFLAGS_NAMESPACE::ParseCommandLineFlags(&argc, &argv, true);
@@ -76,55 +63,27 @@ int main(int argc, char *argv[]) {
 
   // Get image filenames.
   std::vector<std::string> img_filepaths;
-  CHECK(theia::GetFilepathsFromWildcard(FLAGS_input_imgs, &img_filepaths));
+  CHECK(theia::GetFilepathsFromWildcard(FLAGS_input_images, &img_filepaths));
   CHECK_GT(img_filepaths.size(), 0)
-      << "No images found in: " << FLAGS_input_imgs;
+      << "No images found in: " << FLAGS_input_images;
 
   // Set up the feature extractor.
-  theia::FeatureExtractorOptions feature_extractor_options;
-  feature_extractor_options.descriptor_extractor_type =
-      GetDescriptorExtractorType(FLAGS_descriptor);
-  feature_extractor_options.num_threads = FLAGS_num_threads;
-  theia::FeatureExtractor feature_extractor(feature_extractor_options);
+  theia::FeatureExtractor::Options options;
+  options.descriptor_extractor_type =
+      StringToDescriptorExtractorType(FLAGS_descriptor);
+  options.feature_density = StringToFeatureDensity(FLAGS_feature_density);
+  options.num_threads = FLAGS_num_threads;
+  options.output_directory = FLAGS_features_output_directory;
 
-  std::vector<std::vector<theia::Keypoint> > keypoints;
-  std::vector<std::vector<Eigen::VectorXf> > descriptors;
-  std::vector<std::vector<theia::BinaryVectorX> > binary_descriptors;
+  theia::FeatureExtractor feature_extractor(options);
 
   // Extract features from all images.
-  double time_to_extract_features;
-  if (FLAGS_descriptor == "SIFT") {
-    auto start = std::chrono::system_clock::now();
-    CHECK(feature_extractor.Extract(img_filepaths,
-                                    &keypoints,
-                                    &descriptors))
-        << "Feature extraction failed!";
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now() - start);
-    time_to_extract_features = duration.count();
-  } else {
-    auto start = std::chrono::system_clock::now();
-    CHECK(feature_extractor.Extract(img_filepaths,
-                                    &keypoints,
-                                    &binary_descriptors))
-        << "Feature extraction failed!";
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now() - start);
-    time_to_extract_features = duration.count();
-  }
+  theia::Timer timer;
+  CHECK(feature_extractor.ExtractToDisk(img_filepaths))
+      << "Feature extraction failed!";
+  const double time_to_extract_features = timer.ElapsedTimeInSeconds();
 
-  for (int i = 0; i < keypoints.size(); i++) {
-    theia::FloatImage image(img_filepaths[i]);
-    theia::ImageCanvas image_canvas;
-    image_canvas.AddImage(image);
-    const std::string feature_output = theia::StringPrintf(
-        "%s/detected_image_%i.png", FLAGS_img_output_dir.c_str(), i);
-    const theia::RGBPixel color = {255.0, 0.0, 0.0};
-    image_canvas.DrawFeatures(keypoints[i], color);
-    image_canvas.Write(feature_output);
-  }
-
-  LOG(INFO) << "It took " << (time_to_extract_features / 1000.0)
+  LOG(INFO) << "It took " << time_to_extract_features
             << " seconds to extract descriptors from " << img_filepaths.size()
             << " images.";
 }

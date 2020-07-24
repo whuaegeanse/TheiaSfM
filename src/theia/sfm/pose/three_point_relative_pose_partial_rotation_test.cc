@@ -57,6 +57,8 @@ using Eigen::Matrix3d;
 using Eigen::Vector3d;
 using Eigen::Quaterniond;
 
+RandomNumberGenerator rng(60);
+
 // Tests that the three point pose works correctly by taking the passed
 // points_3d, projecting them to get image one rays, transforming by
 // (expected_rotation, expected_translation) to get image two rays and then
@@ -87,11 +89,11 @@ void TestThreePointResultWithNoise(const Vector3d& axis,
     // Adds noise to both of the rays.
     for (int i = 0; i < 3; ++i) {
       Eigen::Vector2d view_one_ray = view_one_rays[i].hnormalized();
-      AddNoiseToProjection(projection_noise_std_dev, &view_one_ray);
+      AddNoiseToProjection(projection_noise_std_dev, &rng, &view_one_ray);
       view_one_rays[i] = view_one_ray.homogeneous().normalized();
 
       Eigen::Vector2d view_two_ray = view_two_rays[i].hnormalized();
-      AddNoiseToProjection(projection_noise_std_dev, &view_two_ray);
+      AddNoiseToProjection(projection_noise_std_dev, &rng, &view_two_ray);
       view_two_rays[i] = view_two_ray.homogeneous().normalized();
     }
   }
@@ -212,8 +214,7 @@ TEST(ThreePointRelativePosePartialRotationTest, NoiseTest) {
       Vector3d(13.0, 1.0, 15.0)
   };
 
-  InitRandomGenerator();
-  for (int transform_index = 0; transform_index < ARRAYSIZE(kAxes);
+  for (int transform_index = 0; transform_index < THEIA_ARRAYSIZE(kAxes);
        ++transform_index) {
     Quaterniond kExpectedRotation(
         AngleAxisd(DegToRad(kAngles[transform_index]), kAxes[transform_index]));
@@ -273,10 +274,10 @@ TEST(ThreePointRelativePosePartialRotationTest, IncorrectAxisTest) {
   };
 
   for (int transform_index = 0;
-       transform_index < ARRAYSIZE(kAxes);
+       transform_index < THEIA_ARRAYSIZE(kAxes);
        ++transform_index) {
     for (int axis_rotation_index = 0;
-         axis_rotation_index < ARRAYSIZE(kAxisPerturbations);
+         axis_rotation_index < THEIA_ARRAYSIZE(kAxisPerturbations);
          ++axis_rotation_index) {
       // Perturbs the axis by the axis perturbation.
       const Vector3d perturbed_axis =
@@ -328,9 +329,8 @@ TEST(ThreePointRelativePosePartialRotationTest, ManyPoints) {
       Vector3d(13.0, 1.0, 15.0)
   };
 
-  InitRandomGenerator();
   for (int i = 0; i < 1000; ++i) {
-    for (int transform_index = 0; transform_index < ARRAYSIZE(kAxes);
+    for (int transform_index = 0; transform_index < THEIA_ARRAYSIZE(kAxes);
          ++transform_index) {
       std::vector<Vector3d> random_points;
       CreateRandomPointsInFrustum(1.0,
@@ -338,6 +338,7 @@ TEST(ThreePointRelativePosePartialRotationTest, ManyPoints) {
                                   2.0,
                                   10.0,
                                   3,
+                                  &rng,
                                   &random_points);
 
       const Vector3d points_3d[3] = { random_points[0],

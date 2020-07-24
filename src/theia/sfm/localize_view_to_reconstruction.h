@@ -35,6 +35,7 @@
 #ifndef THEIA_SFM_LOCALIZE_VIEW_TO_RECONSTRUCTION_H_
 #define THEIA_SFM_LOCALIZE_VIEW_TO_RECONSTRUCTION_H_
 
+#include "theia/sfm/bundle_adjustment/bundle_adjustment.h"
 #include "theia/sfm/types.h"
 #include "theia/solvers/sample_consensus_estimator.h"
 
@@ -46,12 +47,27 @@ class Reconstruction;
 // that determines inliers and outliers during RANSAC. This value will override
 // the error thresh set in the RansacParameters.
 struct LocalizeViewToReconstructionOptions {
-  double reprojection_error_threshold_pixels;
+  // The reprojection error threshold that determines whether a 2D-3D
+  // correspondence is an inlier during localization.
+  //
+  // NOTE: This threshold is with respect to an image that is 1024 pixels
+  // wide. If the image dimensions are larger or smaller than this value then
+  // the threshold will be appropriately scaled.
+  double reprojection_error_threshold_pixels = 4.0;
+
+  // If true, a simplified pose solver will be used to estimate the camera
+  // position given the known orientation. If that solver is not successful,
+  // then standard P3P is used.
+  bool assume_known_orientation = false;
+
+  // The RANSAC parameters used for robust estimation in the localization
+  // algorithms.
   RansacParameters ransac_params;
 
   // The view will be bundle adjusted (while all tracks are held constant) if
   // this is set to true.
   bool bundle_adjust_view = true;
+  BundleAdjustmentOptions ba_options;
 
   // The minimum number of inliers found from RANSAC in order to be considered
   // successful localization.

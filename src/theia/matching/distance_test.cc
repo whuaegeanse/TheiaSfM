@@ -47,10 +47,12 @@ namespace {
 
 int kNumTrials = 100;
 
+RandomNumberGenerator rng(62);
+
 // Zero distance.
 TEST(L2Distance, ZeroDistance) {
   Eigen::VectorXf descriptor1(4);
-  descriptor1.setRandom();
+  rng.SetRandom(&descriptor1);
   descriptor1.normalize();
   Eigen::VectorXf descriptor2 = descriptor1;
   L2 l2_dist;
@@ -59,72 +61,18 @@ TEST(L2Distance, ZeroDistance) {
 
 // Known distance.
 TEST(L2Distance, KnownDistance) {
-  InitRandomGenerator();
   const int num_dimensions = 128;
   Eigen::VectorXf descriptor1(num_dimensions);
   Eigen::VectorXf descriptor2(num_dimensions);
   for (int n = 0; n < kNumTrials; n++) {
-    descriptor1.setRandom();
-    descriptor2.setRandom();
+    rng.SetRandom(&descriptor1);
+    rng.SetRandom(&descriptor2);
     descriptor1.normalize();
     descriptor2.normalize();
     L2 l2_dist;
     const float dist =
-        static_cast<float>(2.0 - 2.0 * descriptor1.dot(descriptor2));
+        static_cast<float>((descriptor1 - descriptor2).squaredNorm());
     ASSERT_DOUBLE_EQ(l2_dist(descriptor1, descriptor2), dist);
-
-  }
-}
-
-// Zero distance.
-TEST(HammingDistance, ZeroDistance) {
-  BinaryVectorX descriptor1(512);
-  descriptor1.setZero();
-  BinaryVectorX descriptor2(512);
-  descriptor2.setZero();
-  Hamming hamming_distance;
-  ASSERT_EQ(hamming_distance(descriptor1, descriptor2), 0);
-}
-
-// Max distance.
-TEST(HammingDistance, MaxDistance) {
-  BinaryVectorX descriptor1(512);
-  descriptor1.setZero();
-  BinaryVectorX descriptor2(512);
-  std::bitset<512>* ones =
-      reinterpret_cast<std::bitset<512>*>(descriptor2.data());
-  ones->reset().flip();
-
-  Hamming hamming_distance;
-  ASSERT_EQ(hamming_distance(descriptor1, descriptor2), 512);
-}
-
-// Known distance.
-TEST(HammingDistance, KnownDistance) {
-  InitRandomGenerator();
-
-  std::bitset<512> zeros;
-  zeros.reset();
-
-  BinaryVectorX descriptor1(512);
-  descriptor1.setZero();
-
-  for (int i = 0; i < kNumTrials; i++) {
-    BinaryVectorX descriptor2(512);
-    descriptor2.setZero();
-    std::bitset<512>* rand_bitset =
-        reinterpret_cast<std::bitset<512>*>(descriptor2.data());
-
-    int hamming_dist = 0;
-    for (int j = 0; j < 512; j++) {
-      if (RandDouble(0.0, 1.0) > 0.7) {
-        rand_bitset->set(j);
-        hamming_dist++;
-      }
-    }
-
-    Hamming hamming_distance;
-    ASSERT_EQ(hamming_distance(descriptor1, descriptor2), hamming_dist);
   }
 }
 

@@ -46,9 +46,10 @@
 #include "theia/sfm/bundle_adjustment/bundle_adjustment.h"
 #include "theia/sfm/bundle_adjustment/optimize_relative_position_with_known_rotation.h"
 #include "theia/sfm/camera/reprojection_error.h"
-#include "theia/sfm/pose/estimate_positions_nonlinear.h"
+#include "theia/sfm/global_pose_estimation/nonlinear_position_estimator.h"
 #include "theia/sfm/reconstruction.h"
 #include "theia/sfm/reconstruction_estimator.h"
+#include "theia/sfm/reconstruction_estimator_options.h"
 #include "theia/sfm/triangulation/triangulation.h"
 #include "theia/sfm/twoview_info.h"
 #include "theia/sfm/view_graph/view_graph.h"
@@ -61,24 +62,11 @@ namespace {
 
 // Accumulate all two view feature matches between the input views. The features
 // are normalized according to the camera intrinsics.
-void GetFeatureCorrespondences(const View& view1, const View& view2,
-                               std::vector<FeatureCorrespondence>* matches) {
-  Eigen::Matrix3d calibration1, calibration2;
-  view1.Camera().GetCalibrationMatrix(&calibration1);
-  view2.Camera().GetCalibrationMatrix(&calibration2);
-  Eigen::Matrix3d inv_calibration1, inv_calibration2;
-  bool view1_invertible, view2_invertible;
-  double determinant;
-  calibration1.computeInverseAndDetWithCheck(inv_calibration1, determinant,
-                                             view1_invertible);
-  calibration2.computeInverseAndDetWithCheck(inv_calibration2, determinant,
-                                             view2_invertible);
-  if (!view1_invertible || !view2_invertible) {
-    LOG(FATAL) << "Calibration matrices are ill formed. Cannot optimize "
-                  "epipolar constraints.";
-    return;
-  }
-
+void GetNormalizedFeatureCorrespondences(
+    const View& view1, const View& view2,
+    std::vector<FeatureCorrespondence>* matches) {
+  const Camera& camera1 = view1.Camera();
+  const Camera& camera2 = view2.Camera();
   const std::vector<TrackId>& tracks = view1.TrackIds();
   for (const TrackId track_id : tracks) {
     const Feature* feature2 = view2.GetFeature(track_id);
@@ -95,26 +83,40 @@ void GetFeatureCorrespondences(const View& view1, const View& view2,
 
     // Normalize for camera intrinsics.
     match.feature1 =
-        (inv_calibration1 * match.feature1.homogeneous()).eval().hnormalized();
+        camera1.PixelToNormalizedCoordinates(match.feature1).hnormalized();
     match.feature2 =
-        (inv_calibration2 * match.feature2.homogeneous()).eval().hnormalized();
+        camera2.PixelToNormalizedCoordinates(match.feature2).hnormalized();
     matches->emplace_back(match);
   }
 }
 
 }  // namespace
 
-using Eigen::Vector3d;
+double ComputeResolutionScaledThreshold(const double threshold_pixels,
+                                        const int image_width,
+                                        const int image_height) {
+  static const double kDefaultImageDimension = 1024.0;
 
-// Sets the bundle adjustment optiosn from the reconstruction estimator options.
+  if (image_width == 0 && image_height == 0) {
+    return threshold_pixels;
+  }
+
+  const int max_image_dimension = std::max(image_width, image_height);
+  return threshold_pixels * static_cast<double>(max_image_dimension) /
+         kDefaultImageDimension;
+}
+
+// Sets the bundle adjustment options from the reconstruction estimator options.
 BundleAdjustmentOptions SetBundleAdjustmentOptions(
     const ReconstructionEstimatorOptions& options, const int num_views) {
   static const int kMinViewsForSparseSchur = 150;
 
   BundleAdjustmentOptions ba_options;
   ba_options.num_threads = options.num_threads;
+  ba_options.loss_function_type = options.bundle_adjustment_loss_function_type;
+  ba_options.robust_loss_width = options.bundle_adjustment_robust_loss_width;
   ba_options.use_inner_iterations = true;
-  ba_options.constant_camera_intrinsics = options.constant_camera_intrinsics;
+  ba_options.intrinsics_to_optimize = options.intrinsics_to_optimize;
 
   if (num_views >= options.min_cameras_for_iterative_solver) {
     ba_options.linear_solver_type = ceres::ITERATIVE_SCHUR;
@@ -126,7 +128,7 @@ BundleAdjustmentOptions SetBundleAdjustmentOptions(
   } else {
     ba_options.linear_solver_type = ceres::DENSE_SCHUR;
   }
-  ba_options.verbose = true;
+  ba_options.verbose = VLOG_IS_ON(1);
   return ba_options;
 }
 
@@ -134,6 +136,7 @@ BundleAdjustmentOptions SetBundleAdjustmentOptions(
 RansacParameters SetRansacParameters(
     const ReconstructionEstimatorOptions& options) {
   RansacParameters ransac_params;
+  ransac_params.rng = options.rng;
   ransac_params.failure_probability = 1.0 - options.ransac_confidence;
   ransac_params.min_iterations = options.ransac_min_iterations;
   ransac_params.max_iterations = options.ransac_max_iterations;
@@ -169,7 +172,8 @@ void SetReconstructionFromEstimatedPoses(
                                    "already been estimated. View Id "
                                 << position.first;
 
-    const Vector3d* orientation = FindOrNull(orientations, position.first);
+    const Eigen::Vector3d* orientation =
+        FindOrNull(orientations, position.first);
     if (orientation == nullptr) {
       LOG(WARNING) << "Cannot add View " << position.first
                    << " to the reconstruction because it does nto contain an "
@@ -180,6 +184,35 @@ void SetReconstructionFromEstimatedPoses(
     view->MutableCamera()->SetPosition(position.second);
     view->MutableCamera()->SetOrientationFromAngleAxis(*orientation);
     view->SetEstimated(true);
+  }
+}
+
+void CreateEstimatedSubreconstruction(
+    const Reconstruction& input_reconstruction,
+    Reconstruction* estimated_reconstruction) {
+  *estimated_reconstruction = input_reconstruction;
+  const auto view_ids = estimated_reconstruction->ViewIds();
+  for (const ViewId view_id : view_ids) {
+    const View* view = estimated_reconstruction->View(view_id);
+    if (view == nullptr) {
+      continue;
+    }
+
+    if (!view->IsEstimated()) {
+      CHECK(estimated_reconstruction->RemoveView(view_id));
+    }
+  }
+
+  const auto track_ids = estimated_reconstruction->TrackIds();
+  for (const TrackId track_id : track_ids) {
+    const Track* track = estimated_reconstruction->Track(track_id);
+    if (track == nullptr) {
+      continue;
+    }
+
+    if (!track->IsEstimated() || track->NumViews() < 2) {
+      CHECK(estimated_reconstruction->RemoveTrack(track_id));
+    }
   }
 }
 
@@ -223,7 +256,7 @@ void RefineRelativeTranslationsWithKnownRotations(
     std::vector<FeatureCorrespondence> matches;
     const View* view1 = reconstruction.View(view_pair.first.first);
     const View* view2 = reconstruction.View(view_pair.first.second);
-    GetFeatureCorrespondences(*view1, *view2, &matches);
+    GetNormalizedFeatureCorrespondences(*view1, *view2, &matches);
 
     TwoViewInfo* info = view_graph->GetMutableEdge(view_pair.first.first,
                                                    view_pair.first.second);
@@ -233,74 +266,6 @@ void RefineRelativeTranslationsWithKnownRotations(
              FindOrDie(orientations, view_pair.first.second),
              &info->position_2);
   }
-}
-
-int RemoveOutlierFeatures(const double max_inlier_reprojection_error,
-                          const double min_triangulation_angle_degrees,
-                          Reconstruction* reconstruction) {
-  const double max_sq_reprojection_error =
-      max_inlier_reprojection_error * max_inlier_reprojection_error;
-
-  int num_estimated_tracks = 0;
-  int num_bad_reprojections = 0;
-  int num_insufficient_viewing_angles = 0;
-
-  const auto& track_ids = reconstruction->TrackIds();
-  for (const TrackId track_id : track_ids) {
-    Track* track = reconstruction->MutableTrack(track_id);
-    if (!track->IsEstimated()) {
-      continue;
-    }
-    ++num_estimated_tracks;
-
-    std::vector<Eigen::Vector3d> ray_directions;
-    const auto& view_ids = track->ViewIds();
-    for (const ViewId view_id : view_ids) {
-      const View* view = CHECK_NOTNULL(reconstruction->View(view_id));
-      if (!view->IsEstimated()) {
-        continue;
-      }
-
-      const Camera& camera = view->Camera();
-      const Eigen::Vector3d ray_direction =
-          track->Point().hnormalized() - camera.GetPosition();
-      ray_directions.push_back(ray_direction.normalized());
-
-      // Check the reprojection error.
-      const Feature* feature = view->GetFeature(track_id);
-      // Reproject the observations.
-      Eigen::Vector2d projection;
-      const double depth = camera.ProjectPoint(track->Point(), &projection);
-      // Remove the feature if the reprojection error is too large or is behind
-      // the camera.
-      const double sq_reprojection_error =
-          (projection - *feature).squaredNorm();
-      if (depth < 0 || sq_reprojection_error > max_sq_reprojection_error) {
-        ++num_bad_reprojections;
-        track->SetEstimated(false);
-        break;
-      }
-    }
-
-    // The track will remain estimated if the reprojection errors were all
-    // good. We then test that the track is properly constrained by having at
-    // least two cameras view it with a sufficient viewing angle.
-    if (track->IsEstimated() &&
-        !SufficientTriangulationAngle(ray_directions,
-                                      min_triangulation_angle_degrees)) {
-      ++num_insufficient_viewing_angles;
-      track->SetEstimated(false);
-    }
-  }
-
-  LOG_IF(INFO, num_bad_reprojections > 0 || num_insufficient_viewing_angles > 0)
-      << num_bad_reprojections
-      << " points were removed because of bad reprojection errors. "
-      << num_insufficient_viewing_angles
-      << " points were removed because they had insufficient viewing angles "
-         "and were poorly constrained.";
-
-  return num_bad_reprojections + num_insufficient_viewing_angles;
 }
 
 int SetUnderconstrainedTracksToUnestimated(Reconstruction* reconstruction) {
@@ -362,6 +327,30 @@ int SetUnderconstrainedViewsToUnestimated(Reconstruction* reconstruction) {
   }
 
   return num_underconstrained_views;
+}
+
+int NumEstimatedViews(const Reconstruction& reconstruction) {
+  int num_estimated_views = 0;
+  for (const ViewId view_id : reconstruction.ViewIds()) {
+    const View* view = reconstruction.View(view_id);
+    if (view == nullptr || !view->IsEstimated()) {
+      continue;
+    }
+    ++num_estimated_views;
+  }
+  return num_estimated_views;
+}
+
+int NumEstimatedTracks(const Reconstruction& reconstruction) {
+  int num_estimated_tracks = 0;
+  for (const TrackId track_id : reconstruction.TrackIds()) {
+    const Track* track = reconstruction.Track(track_id);
+    if (track == nullptr || !track->IsEstimated()) {
+      continue;
+    }
+    ++num_estimated_tracks;
+  }
+  return num_estimated_tracks;
 }
 
 }  // namespace theia

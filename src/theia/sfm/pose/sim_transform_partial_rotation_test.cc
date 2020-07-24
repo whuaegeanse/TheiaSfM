@@ -46,6 +46,7 @@
 #include "theia/sfm/pose/sim_transform_partial_rotation.h"
 #include "theia/sfm/pose/test_util.h"
 #include "theia/test/test_utils.h"
+#include "theia/util/random.h"
 #include "theia/util/util.h"
 
 namespace theia {
@@ -56,6 +57,8 @@ using Eigen::Matrix3d;
 using Eigen::Matrix3d;
 using Eigen::Quaterniond;
 using Eigen::Vector3d;
+
+RandomNumberGenerator rng(60);
 
 // Tests that the four point pose works correctly by taking the passed
 // points_3d, projecting them to view_1_origins to get image one rays,
@@ -96,8 +99,8 @@ void TestSimTransformResultWithNoise(const Vector3d& axis,
   }
   if (projection_noise_std_dev) {
     for (int i = 0; i < 5; ++i) {
-      AddNoiseToRay(projection_noise_std_dev, &image_one_rays[i]);
-      AddNoiseToRay(projection_noise_std_dev, &image_two_rays[i]);
+      AddNoiseToRay(projection_noise_std_dev, &rng, &image_one_rays[i]);
+      AddNoiseToRay(projection_noise_std_dev, &rng, &image_two_rays[i]);
     }
   }
   std::vector<Quaterniond> soln_rotations;
@@ -300,7 +303,7 @@ TEST(SimTransformPartialRotationTest, NoiseTest) {
   const double kScales[5] = { 1.2, 2.9, 10.3, 4.2, 5.3 };
 
   for (int transform_index = 0;
-       transform_index < ARRAYSIZE(kAxes);
+       transform_index < THEIA_ARRAYSIZE(kAxes);
        ++transform_index) {
     Quaterniond kExpectedRotation(
         AngleAxisd(DegToRad(kAngles[transform_index]), kAxes[transform_index]));
@@ -375,10 +378,10 @@ TEST(SimTransformPartialRotationTest, IncorrectAxisTest) {
   };
 
   for (int transform_index = 0;
-       transform_index < ARRAYSIZE(kAxes);
+       transform_index < THEIA_ARRAYSIZE(kAxes);
        ++transform_index) {
     for (int axis_rotation_index = 0;
-         axis_rotation_index < ARRAYSIZE(kAxisPerturbations);
+         axis_rotation_index < THEIA_ARRAYSIZE(kAxisPerturbations);
          ++axis_rotation_index) {
       // Perturbs the axis by the axis perturbation.
       const Vector3d perturbed_axis =

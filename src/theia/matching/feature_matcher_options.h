@@ -35,12 +35,15 @@
 #ifndef THEIA_MATCHING_FEATURE_MATCHER_OPTIONS_H_
 #define THEIA_MATCHING_FEATURE_MATCHER_OPTIONS_H_
 
-#include <limits>
+#include <string>
+
+#include "theia/sfm/two_view_match_geometric_verification.h"
 
 namespace theia {
 
 // Options for matching image collections.
 struct FeatureMatcherOptions {
+  // Number of threads to use in parallel for matching.
   int num_threads = 1;
 
   // Only symmetric matches are kept.
@@ -51,6 +54,16 @@ struct FeatureMatcherOptions {
   // second nearest neighbor match.
   bool use_lowes_ratio = true;
   float lowes_ratio = 0.8;
+
+  // After performing feature matching with descriptors typically the 2-view
+  // geometry is estimated using RANSAC (from the matched descriptors) and only
+  // the features that support the estimated geometry are "verified" as
+  // plausible and are kept. If set to true, geometric verification will be
+  // performed to obtain higher quality matches.
+  bool perform_geometric_verification = true;
+
+  // The parameter settings for geometric verification.
+  TwoViewMatchGeometricVerification::Options geometric_verification_options;
 
   // Only images that contain more feature matches than this number will be
   // returned.

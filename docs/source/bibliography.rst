@@ -32,6 +32,10 @@ Bibliography
    Binary Robust Independent Elementary Features**, *11th European Conference
    on Computer Vision (ECCV)*, September 2010
 
+.. [Devernay] Devernay, and Faugeras. **Straight Lines Have to be Straight:
+   Automatic Calibration and Removal of Distortion from Scenes of Structured
+   Environments**, *Machine Vision and Applications*, 2001.
+
 .. [Fischler] M. Fischler and R. Bolles. 1981. **Random sample consensus: a
    paradigm for model fitting with applications to image analysis and automated
    cartography**. *Commun. ACM* 24, 6 (June 1981), 381-395.
@@ -47,14 +51,20 @@ Bibliography
 .. [Hesch] J. Hesch, S. Roumeliotis. **A Direct Least-Squares (DLS) Approach for PnP**,
    *In Proceedings of the IEEE International Conference on Computer Vision (ICCV) 2013*
 
-.. [Kneip] L. Kneip, D. Scaramuzza, R. Siegwart, **A Novel Parametrization of the
-   Perspective-Three-Point Problem for a Direct Computation of Absolute Camera
-   Position and Orientation**, *In Proceedings of The IEEE Conference on Computer Vision
-   and Pattern Recognition (CVPR)*. Colorado Springs, USA. June 2011.
+.. [JenkinsTraub] Jenkins and Traub. **A Three-Stage Algorithm for Real Polynomaials
+   Using Quadratic Iteration**, SIAM, 1970.
 
 .. [JiangICCV] Jiang, N. and Cui, Z., and Tan, P. **A Global Linear Method for
    Camera Pose Registration**, *International Conference on Computer Vision
    (ICCV)*, 2013.
+
+.. [KennedyIROS2012] Kennedy, R. and Daniilidis, K. and Naroditsky, O. and Taylor,
+   C.J. **Identifying maximal rigid components in bearing-based localization**, IROS 2012
+
+.. [Kneip] L. Kneip, D. Scaramuzza, R. Siegwart, **A Novel Parametrization of the
+   Perspective-Three-Point Problem for a Direct Computation of Absolute Camera
+   Position and Orientation**, *In Proceedings of The IEEE Conference on Computer Vision
+   and Pattern Recognition (CVPR)*. Colorado Springs, USA. June 2011.
 
 .. [Kukelova] Z. Kukelova, M. Bujnak, T. Pajdla. **Real-time Solution to the
    Absolute Pose Problem with Unknown Radial Distortion and Focal Length**. *In
@@ -81,6 +91,10 @@ Bibliography
    *In Proceedings of the European Conference on Computer Vision (ECCV'10)*,
    September 2010.
 
+.. [Martinec2007] Martinec, D. and Pajdla, T. **Robust Rotation and Translation
+   Estimation in Multiview Geometry**, *In Proceedings of the IEEE Conference
+   on Computer Vision and Pattern Recognition*, 2010.
+
 .. [MoulonICCV] Moulon, P. and Monasse, P. and Marlet, R. **Global Fusion of
    Relative Motions for Robust, Accurate and Scalable Structure from Motion**
    *International Conference on Computer Vision (ICCV)*, 2013.
@@ -88,6 +102,10 @@ Bibliography
 .. [Nister] David Nistér. 2004. **An Efficient Solution to the Five-Point Relative
    Pose Problem**. *IEEE Trans. Pattern Anal. Mach. Intell*. 26, 6 (June 2004),
    756-777.
+
+.. [OzyesilCVPR2015] O. Ozyesil and Singer, A. **Robust Camera Location
+   Estimation by Convex Programming** *In Proceedings of the IEEE Conference
+   on Computer Vision and Pattern Recognition*, 2015.
 
 .. [Raguram] R. Raguram, J.M. Frahm, and M. Pollefeys. 2008. **A
    Comparative Analysis of RANSAC Techniques Leading to Adaptive Real-Time
@@ -98,6 +116,9 @@ Bibliography
 .. [RaguramFrahm] R. Raguram, J.M. Frahm. **RECON: Scale-Adaptive Robust
    Estimation via Residual Consensus**. *International Conference on Computer
    Vision (ICCV)*, 2011.
+
+.. [Rousseeuw] P. Rousseeuw. **Least Median of Squares Regression**. *Journal of
+               the American Statistical Association, 1984*.
 
 .. [PhotoTourism] N. Snavely, S. Seitz, and R. Szeliski. **Photo tourism:
    exploring photo collections in 3D.** *ACM transactions on graphics (TOG)*, 2006.
@@ -113,6 +134,10 @@ Bibliography
 .. [SweeneyGDLS] C. Sweeney, V. Fragoso, T. Hollerer, M. Turk. **gDLS: A
    Scalable Solution to the Generalized Pose and Scale Problem**. *European
    Conference on Computer Vision (ECCV)*, 2014
+
+.. [SweeneyISMAR2015] C. Sweeney, J. Flynn, B. Nuernberger, M. Turk, T. Hollerer.
+   **Efficient Computation of Absolute Pose for Gravity-Aware Augmented Reality.**
+   *International Symposium on Mixed and Augmented Reality (ISMAR)*, 2015.
 
 .. [SweeneyQEP] C. Sweeney, J. Flynn, M. Turk. **Solving for Relative Pose with a
    Partially Known Rotation is a Quadratic Eigenvalue Problem**. *International

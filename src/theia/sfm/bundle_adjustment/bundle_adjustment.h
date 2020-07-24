@@ -35,31 +35,77 @@
 #ifndef THEIA_SFM_BUNDLE_ADJUSTMENT_BUNDLE_ADJUSTMENT_H_
 #define THEIA_SFM_BUNDLE_ADJUSTMENT_BUNDLE_ADJUSTMENT_H_
 
-#include <ceres/ceres.h>
-#include <vector>
+#include <ceres/types.h>
+#include <unordered_set>
+
+#include "theia/sfm/bundle_adjustment/create_loss_function.h"
 #include "theia/sfm/types.h"
+#include "theia/util/enable_enum_bitmask_operators.h"
 
 namespace theia {
 
 class Reconstruction;
 
+// The camera intrinsics parameters are defined by:
+//   - Focal length
+//   - Aspect ratio
+//   - Skew
+//   - Principal points (x and y)
+//   - Radial distortion
+//   - Tangential distortion
+// These intrinsic parameters may or may not be present for a given camera model
+// and only the relevant intrinsics will be optimized per camera. It is often
+// known for instance that skew is 0 and aspect ratio is 1, and so we do not
+// always desire to optimize all camera intrinsics. In many cases, the focal
+// length is the only parameter we care to optimize.
+//
+// Users can specify which intrinsics to optimize by using a bitmask. For
+// instance FOCAL_LENGTH|PRINCIPAL_POINTS will optimize the focal length and
+// principal points. The options NONE and ALL are also given for convenience.
+enum class OptimizeIntrinsicsType {
+  NONE = 0x00,
+  FOCAL_LENGTH = 0x01,
+  ASPECT_RATIO = 0x02,
+  SKEW = 0x04,
+  PRINCIPAL_POINTS = 0x08,
+  RADIAL_DISTORTION = 0x10,
+  TANGENTIAL_DISTORTION = 0x20,
+  ALL = FOCAL_LENGTH | ASPECT_RATIO | SKEW | PRINCIPAL_POINTS |
+        RADIAL_DISTORTION | TANGENTIAL_DISTORTION,
+};
+ENABLE_ENUM_BITMASK_OPERATORS(OptimizeIntrinsicsType)
+
 struct BundleAdjustmentOptions {
+  // The type of loss function used for BA. By default, we use a standard L2
+  // loss function, but robust cost functions could be used.
+  LossFunctionType loss_function_type = LossFunctionType::TRIVIAL;
+  double robust_loss_width = 2.0;
+
   // For larger problems (> 1000 cameras) it is recommended to use the
   // ITERATIVE_SCHUR solver.
   ceres::LinearSolverType linear_solver_type = ceres::SPARSE_SCHUR;
   ceres::PreconditionerType preconditioner_type = ceres::SCHUR_JACOBI;
   ceres::VisibilityClusteringType visibility_clustering_type =
-      ceres::SINGLE_LINKAGE;
+      ceres::CANONICAL_VIEWS;
 
   // If true, ceres will log verbosely.
   bool verbose = false;
 
-  // If set to true, the camera intrinsics are held constant. This is useful if
-  // the calibration is precisely known ahead of time.
-  bool constant_camera_intrinsics = false;
+  // If true, the camera orientations and/or positions will be set to
+  // constant. This may be desirable if, for instance, you have accurate
+  // positions from GPS but do not know camera orientations.
+  bool constant_camera_orientation = false;
+  bool constant_camera_position = false;
+
+  // Indicates which intrinsics should be optimized as part of bundle
+  // adjustment. By default, we do not optimize skew and aspect ratio since
+  // these are almost universally constant.
+  OptimizeIntrinsicsType intrinsics_to_optimize =
+      OptimizeIntrinsicsType::FOCAL_LENGTH |
+      OptimizeIntrinsicsType::RADIAL_DISTORTION;
 
   int num_threads = 1;
-  int max_num_iterations = 500;
+  int max_num_iterations = 100;
 
   // Max BA time is 1 hour.
   double max_solver_time_in_seconds = 3600.0;
@@ -93,7 +139,19 @@ BundleAdjustmentSummary BundleAdjustReconstruction(
 // Bundle adjust the specified views and all tracks observed by those views.
 BundleAdjustmentSummary BundleAdjustPartialReconstruction(
     const BundleAdjustmentOptions& options,
-    const std::vector<ViewId>& views_to_optimize,
+    const std::unordered_set<ViewId>& views_to_optimize,
+    const std::unordered_set<TrackId>& tracks_to_optimize,
+    Reconstruction* reconstruction);
+
+// Bundle adjust a single view.
+BundleAdjustmentSummary BundleAdjustView(const BundleAdjustmentOptions& options,
+                                         const ViewId view_id,
+                                         Reconstruction* reconstruction);
+
+// Bundle adjust a single track.
+BundleAdjustmentSummary BundleAdjustTrack(
+    const BundleAdjustmentOptions& options,
+    const TrackId track_id,
     Reconstruction* reconstruction);
 
 }  // namespace theia

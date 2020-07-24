@@ -35,7 +35,7 @@
 #ifndef THEIA_SFM_EXIF_READER_H_
 #define THEIA_SFM_EXIF_READER_H_
 
-#include <easyexif/exif.h>
+#include <OpenImageIO/imageio.h>
 #include <string>
 #include <unordered_map>
 
@@ -43,6 +43,9 @@
 #include "theia/util/util.h"
 
 namespace theia {
+// Aliasing oiio to whatever the correct Open Image IO namesace is.
+// The macro OIIO_NAMESPACE is defined in OpenImageIO/oiioversion.h.
+namespace oiio = OIIO_NAMESPACE;
 
 struct CameraIntrinsicsPrior;
 
@@ -71,17 +74,16 @@ class ExifReader {
  private:
   void LoadSensorWidthDatabase();
 
-  // Sets the focal length from the focal plane resolution.
-  void SetFocalLengthFromExif(
-      const EXIFInfo& exif_parser,
-      const double image_width,
-      const double image_height,
+  // Sets the focal length from the focal plane resolution. Returns true if a
+  // valid focal length is found and false otherwise.
+  bool SetFocalLengthFromExif(
+      const oiio::ImageSpec& image_spec,
       CameraIntrinsicsPrior* camera_intrinsics_prior) const;
 
-  // Sets the focal length from a look up in the sensor width database.
-  void SetFocalLengthFromSensorDatabase(
-      const EXIFInfo& exif_parser,
-      const double max_image_dimension,
+  // Sets the focal length from a look up in the sensor width database. Returns
+  // true if a valid focal length is found and false otherwise.
+  bool SetFocalLengthFromSensorDatabase(
+      const oiio::ImageSpec& image_spec,
       CameraIntrinsicsPrior* camera_intrinsics_prior) const;
 
   std::unordered_map<std::string, double> sensor_width_database_;

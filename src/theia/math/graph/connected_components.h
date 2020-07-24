@@ -36,6 +36,7 @@
 #define THEIA_MATH_GRAPH_CONNECTED_COMPONENTS_H_
 
 #include <glog/logging.h>
+#include <stdint.h>
 
 #include <limits>
 #include <unordered_map>
@@ -115,6 +116,19 @@ class ConnectedComponents {
       const Root* root = FindRoot(node.first);
       (*connected_components)[root->id].insert(node.first);
     }
+  }
+
+  // Returns true if both nodes are in the same connected component and false
+  // otherwise.
+  bool NodesInSameConnectedComponent(const T& node1, const T& node2) {
+    if (!ContainsKey(disjoint_set_, node1) ||
+        !ContainsKey(disjoint_set_, node2)) {
+      return false;
+    }
+
+    const Root* root1 = FindRoot(node1);
+    const Root* root2 = FindRoot(node2);
+    return root1->id == root2->id;
   }
 
  private:

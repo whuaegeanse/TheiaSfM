@@ -35,6 +35,7 @@
 #ifndef THEIA_IMAGE_KEYPOINT_DETECTOR_SIFT_PARAMETERS_H_
 #define THEIA_IMAGE_KEYPOINT_DETECTOR_SIFT_PARAMETERS_H_
 
+namespace theia {
 // Sift blob feature detector parameters. Since the Sift implementation is based
 // on the VLFeat one, please visit (http://www.vlfeat.org/api/sift.html) for
 // getting more info about the parameters.
@@ -49,9 +50,10 @@ struct SiftParameters {
       first_octave(first_octave), edge_threshold(edge_threshold),
       peak_threshold(peak_threshold) {}
 
-  SiftParameters(int num_octaves, int num_levels, int first_octave) :
-      SiftParameters(num_octaves, num_levels, first_octave,
-                     5.0f, 0.5f) {}
+  SiftParameters(int num_octaves, int num_levels, int first_octave)
+      : num_octaves(num_octaves),
+        num_levels(num_levels),
+        first_octave(first_octave) {}
 
   ~SiftParameters() {}
 
@@ -59,9 +61,9 @@ struct SiftParameters {
   // Blob feature detector params.
   int num_octaves = -1;
   int num_levels = 3;
-  int first_octave = 0;
-  float edge_threshold = 5.0f;
-  float peak_threshold = 0.5f;
+  int first_octave = -1;
+  float edge_threshold = 10.0f / 255.0;
+  float peak_threshold = 1.2f / 255.0;
   // Descriptor parameters.
   bool root_sift = true;
   // Upright sift enables only a single descriptor to be extracted at a given
@@ -69,5 +71,7 @@ struct SiftParameters {
   // geometric verification.
   bool upright_sift = true;
 };
+
+}  // namespace theia
 
 #endif  // THEIA_IMAGE_KEYPOINT_DETECTOR_SIFT_PARAMETERS_H_

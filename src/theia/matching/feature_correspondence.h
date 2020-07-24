@@ -35,7 +35,11 @@
 #ifndef THEIA_MATCHING_FEATURE_CORRESPONDENCE_H_
 #define THEIA_MATCHING_FEATURE_CORRESPONDENCE_H_
 
+#include <cereal/access.hpp>
+#include <cereal/cereal.hpp>
 #include <Eigen/Core>
+#include <stdint.h>
+
 #include "theia/alignment/alignment.h"
 #include "theia/sfm/feature.h"
 
@@ -44,14 +48,31 @@ namespace theia {
 // The feature location of two correspondences. These can be pixel coordinates
 // or normalized coordinates.
 struct FeatureCorrespondence {
+ public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
   Feature feature1;
   Feature feature2;
+
+  FeatureCorrespondence() {}
+  FeatureCorrespondence(const Feature& feature1, const Feature& feature2)
+      : feature1(feature1), feature2(feature2) {}
+
   bool operator==(const FeatureCorrespondence& other) const {
-    return (feature1 == other.feature1 && feature2 == other.feature1);
+    return (feature1 == other.feature1 && feature2 == other.feature2);
+  }
+
+ private:
+  // Templated method for disk I/O with cereal. This method tells cereal which
+  // data members should be used when reading/writing to/from disk.
+  friend class cereal::access;
+  template <class Archive>
+  void serialize(Archive& ar, const std::uint32_t version) {  // NOLINT
+    ar(feature1, feature2);
   }
 };
 
 }  // namespace theia
+
+CEREAL_CLASS_VERSION(theia::FeatureCorrespondence, 0);
 
 #endif  // THEIA_MATCHING_FEATURE_CORRESPONDENCE_H_

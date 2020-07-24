@@ -56,6 +56,8 @@ using Eigen::Quaterniond;
 using Eigen::Vector2d;
 using Eigen::Vector3d;
 
+RandomNumberGenerator rng(59);
+
 void TestDlsPnpWithNoise(const std::vector<Vector3d>& world_points,
                          const double projection_noise_std_dev,
                          const Quaterniond& expected_rotation,
@@ -63,8 +65,6 @@ void TestDlsPnpWithNoise(const std::vector<Vector3d>& world_points,
                          const double max_reprojection_error,
                          const double max_rotation_difference,
                          const double max_translation_difference) {
-  InitRandomGenerator();
-
   const int num_points = world_points.size();
 
   Matrix3x4d expected_transform;
@@ -83,7 +83,7 @@ void TestDlsPnpWithNoise(const std::vector<Vector3d>& world_points,
   if (projection_noise_std_dev) {
     // Adds noise to both of the rays.
     for (int i = 0; i < num_points; i++) {
-      AddNoiseToProjection(projection_noise_std_dev, &feature_points[i]);
+      AddNoiseToProjection(projection_noise_std_dev, &rng, &feature_points[i]);
     }
   }
 
@@ -193,7 +193,7 @@ TEST(DlsPnp, ManyPoints) {
       Vector3d(1.0, 1.0, 1.0).normalized()
   };
 
-  static const double kRotationAngles[ARRAYSIZE(kAxes)] = {
+  static const double kRotationAngles[THEIA_ARRAYSIZE(kAxes)] = {
       DegToRad(7.0),
       DegToRad(12.0),
       DegToRad(15.0),
@@ -204,7 +204,7 @@ TEST(DlsPnp, ManyPoints) {
       DegToRad(0.0)  // Tests no rotation and no translation.
   };
 
-  static const Vector3d kTranslations[ARRAYSIZE(kAxes)] = {
+  static const Vector3d kTranslations[THEIA_ARRAYSIZE(kAxes)] = {
       Vector3d(1.0, 1.0, 1.0),
       Vector3d(3.0, 2.0, 13.0),
       Vector3d(4.0, 5.0, 11.0),
@@ -221,15 +221,15 @@ TEST(DlsPnp, ManyPoints) {
   const double kMaxAllowedRotationDifference = DegToRad(0.3);
   const double kMaxAllowedTranslationDifference = 5e-3;
 
-  for (int i = 0; i < ARRAYSIZE(kAxes); i++) {
+  for (int i = 0; i < THEIA_ARRAYSIZE(kAxes); i++) {
     const Quaterniond soln_rotation(AngleAxisd(kRotationAngles[i], kAxes[i]));
-    for (int j = 0; j < ARRAYSIZE(num_points); j++) {
+    for (int j = 0; j < THEIA_ARRAYSIZE(num_points); j++) {
       std::vector<Vector3d> points_3d;
       points_3d.reserve(num_points[j]);
       for (int k = 0; k < num_points[j]; k++) {
-        points_3d.push_back(Vector3d(RandDouble(-5.0, 5.0),
-                                     RandDouble(-5.0, 5.0),
-                                     RandDouble(2.0, 10.0)));
+        points_3d.push_back(Vector3d(rng.RandDouble(-5.0, 5.0),
+                                     rng.RandDouble(-5.0, 5.0),
+                                     rng.RandDouble(2.0, 10.0)));
       }
 
       TestDlsPnpWithNoise(points_3d,

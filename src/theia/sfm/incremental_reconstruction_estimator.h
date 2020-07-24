@@ -43,10 +43,8 @@
 #include "theia/sfm/localize_view_to_reconstruction.h"
 #include "theia/sfm/reconstruction_estimator.h"
 #include "theia/sfm/reconstruction_estimator_options.h"
-#include "theia/sfm/twoview_info.h"
 #include "theia/sfm/types.h"
 #include "theia/solvers/sample_consensus_estimator.h"
-#include "theia/util/timer.h"
 #include "theia/util/util.h"
 
 namespace theia {
@@ -63,7 +61,7 @@ class ViewGraph;
 // quality reconstructions and to avoid drift.
 //
 // The incremental SfM pipeline is as follows:
-//   1) Choose an initial camera pair to reconstruct.
+//   1) Choose an initial camera pair to reconstruct (if necessary).
 //   2) Estimate 3D structure of the scene.
 //   3) Bundle adjustment on the 2-view reconstruction.
 //   4) Localize a new camera to the current 3D points. Choose the camera that
@@ -73,6 +71,10 @@ class ViewGraph;
 //      bundle adjustment.
 //   7) Repeat steps 4-6 until all cameras have been added.
 //
+// Note that steps 1-3 are skipped if an "initialized" reconstruction (one that
+// already contains estimated views and tracks) is passed into the Estimate
+// function.
+//
 // Incremental SfM is generally considered to be more robust than global SfM
 // methods; hwoever, it requires many more instances of bundle adjustment (which
 // is very costly) and so incremental SfM is not as efficient or scalable.
@@ -81,6 +83,9 @@ class IncrementalReconstructionEstimator : public ReconstructionEstimator {
   IncrementalReconstructionEstimator(
       const ReconstructionEstimatorOptions& options);
 
+  // Estimates the camera parameters and 3D points from the view graph and
+  // tracks. The reconstruction may or may not contain estimated views and
+  // tracks upon input.
   ReconstructionEstimatorSummary Estimate(ViewGraph* view_graph,
                                           Reconstruction* reconstruction);
 
@@ -91,22 +96,34 @@ class IncrementalReconstructionEstimator : public ReconstructionEstimator {
   // correspondences between the views.
   bool ChooseInitialViewPair();
 
-  // Given a set of view pairs, select the pairs with the largest number of
-  // inlier piotns and have a sufficient baseline between them.
-  void OrderViewPairsByBaseline(const int num_candidate_view_pairs,
-                                std::vector<ViewIdPair>* view_id_pairs);
+  // The best initial view pairs for incremental SfM are the ones that have a
+  // lot of matches but sufficient baseline between them. One measurement for a
+  // well-constrained baseline between cameras is the number of inliers when
+  // estimating a homography (more inliers means it is less constrained i.e.,
+  // bad). This method chooses the view pairs with more than
+  // min_num_verified_matches that have the fewest homography inliers.
+  void OrderViewPairsByInitializationCriterion(
+      const int min_num_verified_matches,
+      std::vector<ViewIdPair>* view_id_pairs);
 
   // Initialize the views based on the TwoViewInfo of the view pairs and set the
   // views as estimated.
   void InitializeCamerasFromTwoViewInfo(const ViewIdPair& view_ids);
 
-  // Estimates the 3D structure of all possible unestimated 3D points.
-  void EstimateStructure();
+  // Estimates all possible 3D points in the view. This is useful during
+  // incremental SfM because we only need to triangulate points that were added
+  // with new views.
+  void EstimateStructure(const ViewId view_id);
 
-  // Performs bundle adjustment on the model. Depending on the state of the
-  // reconstruction either partial BA is run on the k cameras that were most
-  // recently added or on the full model.
-  void BundleAdjustment();
+  // The current percentage of cameras that have not been optimized by full BA.
+  double UnoptimizedGrowthPercentage();
+
+  // Performs partial bundle adjustment on the model. Only the k most recent
+  // cameras (and the tracks observed in those views) are optimized.
+  bool PartialBundleAdjustment();
+
+  // Performs full bundle adjustment on the model.
+  bool FullBundleAdjustment();
 
   // Chooses the next cameras to be localized according to which camera observes
   // the highest number of 3D points in the scene. This view is then localized
@@ -114,8 +131,9 @@ class IncrementalReconstructionEstimator : public ReconstructionEstimator {
   void FindViewsToLocalize(std::vector<ViewId>* views_to_localize);
 
   // Remove any features that have too high of reprojection errors or are not
-  // well-constrained
-  void RemoveOutlierTracks(const double max_reprojection_error_in_pixels);
+  // well-constrained. Only the input features are checked for outliers.
+  void RemoveOutlierTracks(const std::unordered_set<TrackId>& tracks_to_check,
+                           const double max_reprojection_error_in_pixels);
 
   // Set any views that do not observe enough 3D points to unestimated, and
   // similarly set and tracks that are not observed by enough views to
@@ -128,13 +146,14 @@ class IncrementalReconstructionEstimator : public ReconstructionEstimator {
   ReconstructionEstimatorOptions options_;
   BundleAdjustmentOptions bundle_adjustment_options_;
   RansacParameters ransac_params_;
-  EstimateTrackOptions triangulation_options_;
+  TrackEstimator::Options triangulation_options_;
   LocalizeViewToReconstructionOptions localization_options_;
 
   ReconstructionEstimatorSummary summary_;
 
   // A container to keep track of which views need to be localized.
-  std::unordered_set<ViewId> views_to_localize_;
+  std::unordered_set<ViewId> unlocalized_views_;
+
   // An *ordered* container to keep track of which views have been added to the
   // reconstruction. This is used to determine which views are optimized during
   // partial BA.

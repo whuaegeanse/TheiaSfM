@@ -41,9 +41,8 @@
 
 namespace theia {
 
-bool GetFilepathsFromWildcard(
-    const std::string& filepath_with_wildcard,
-    std::vector<std::string>* filepaths) {
+bool GetFilepathsFromWildcard(const std::string& filepath_with_wildcard,
+                              std::vector<std::string>* filepaths) {
   CHECK_NOTNULL(filepaths)->clear();
 
   const std::string folder = stlplus::folder_part(filepath_with_wildcard);
@@ -86,18 +85,30 @@ bool GetFilenameFromFilepath(const std::string& filepath,
   return filename->length() > 0;
 }
 
+bool GetDirectoryFromFilepath(const std::string& filepath,
+                              std::string* directory) {
+  CHECK_NOTNULL(directory)->clear();
+  *directory = stlplus::folder_part(filepath);
+  return directory->length() > 0;
+}
+
 bool FileExists(const std::string& filename) {
   return stlplus::file_exists(filename);
 }
 
 // Returns true if the directory exists, false otherwise.
 bool DirectoryExists(const std::string& directory) {
-    return stlplus::folder_exists(directory);
+  return stlplus::folder_exists(directory);
 }
 
 // Creates the given directory.
-bool CreateDirectory(const std::string& directory) {
+bool CreateNewDirectory(const std::string& directory) {
   return stlplus::folder_create(directory);
+}
+
+bool CopyFile(const std::string& filepath_to_copy_from,
+              const std::string& filepath_to_copy_to) {
+  return stlplus::file_copy(filepath_to_copy_from, filepath_to_copy_to);
 }
 
 }  // namespace theia

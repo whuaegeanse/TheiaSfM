@@ -32,11 +32,11 @@
 #include "statx/distributions/evd/gev.h"
 #include <vector>
 #include "statx/distributions/evd/gev_mle.h"
-#ifdef WITH_CERES
+#ifdef STATX_WITH_CERES
 #include "statx/distributions/evd/gev_ceres.h"
 #endif
 
-namespace statx {
+namespace libstatx {
 namespace distributions {
 namespace evd {
 
@@ -57,13 +57,14 @@ bool gevfit(const vector<double>& data,
       exit_flag = gevfit_mle(data, mu, sigma, xi);
       break;
     case QUANTILE_NLS:
-#ifdef WITH_CERES
+#ifdef STATX_WITH_CERES
       exit_flag = gevfit_ceres(data, mu, sigma, xi);
 #endif
       break;
   }
   return exit_flag;
 }
-}  // evd
-}  // distributions
-}  // statx
+
+}  // namespace evd
+}  // namespace distributions
+}  // namespace libstatx

@@ -39,24 +39,29 @@
 #include <string>
 #include <vector>
 
-#include "theia/image/keypoint_detector/sift_parameters.h"
-#include "theia/io/write_matches.h"
-#include "theia/util/util.h"
+#include "theia/image/descriptor/create_descriptor_extractor.h"
+#include "theia/matching/create_feature_matcher.h"
 #include "theia/matching/feature_matcher_options.h"
-#include "theia/sfm/camera_intrinsics_prior.h"
-#include "theia/sfm/estimate_twoview_info.h"
-#include "theia/sfm/exif_reader.h"
-#include "theia/sfm/feature_extractor.h"
-#include "theia/sfm/match_and_verify_features.h"
 #include "theia/sfm/reconstruction_estimator_options.h"
+#include "theia/sfm/types.h"
+#include "theia/util/util.h"
 
 namespace theia {
-
+class FeatureExtractorAndMatcher;
+class FeaturesAndMatchesDatabase;
+class RandomNumberGenerator;
 class Reconstruction;
 class TrackBuilder;
 class ViewGraph;
+struct CameraIntrinsicsPrior;
+struct ImagePairMatch;
 
 struct ReconstructionBuilderOptions {
+  // The random number generator used to generate random numbers through the
+  // reconstruction building process. If this is a nullptr then the random
+  // generator will be initialized based on the current time.
+  std::shared_ptr<RandomNumberGenerator> rng;
+
   // Number of threads used. Each stage of the pipeline (feature extraction,
   // matching, estimation, etc.) will use this number of threads.
   int num_threads = 1;
@@ -71,60 +76,90 @@ struct ReconstructionBuilderOptions {
   // added to the reconstruction builder they are ignored with a LOG warning.
   bool only_calibrated_views = false;
 
+  // Minimum allowable track length. Tracks that are too short are often not
+  // well-constrained for triangulation and bundle adjustment.
+  int min_track_length = 2;
+
   // Maximum allowable track length. Tracks that are too long are exceedingly
   // likely to contain outliers.
-  int max_track_length = 20;
+  int max_track_length = 50;
 
   // Minimum number of geometrically verified inliers that a view pair must have
   // in order to be considered a good match.
   int min_num_inlier_matches = 30;
 
   // Descriptor type for extracting features.
-  // See //theia/sfm/feature_extractor.h
+  // See //theia/image/descriptor/create_descriptor_extractor.h
   DescriptorExtractorType descriptor_type = DescriptorExtractorType::SIFT;
 
-  // Sift parameters controlling keypoint detection and description options.
-  // See //theia/image/keypoint_detector/sift_parameters.h
-  SiftParameters sift_parameters;
+  // The density of features to extract. DENSE means more features are
+  // extracted per image and SPARSE means fewer features per image are
+  // extracted.
+  FeatureDensity feature_density = FeatureDensity::NORMAL;
+
+  // Keypoints and descriptors are stored to disk as they are added to the
+  // FeatureMatcher. Features will be stored in this directory, which must be a
+  // valid writeable directory.
+  std::string features_and_matches_database_directory = "";
 
   // Matching strategy type.
-  // See //theia/sfm/match_and_verify_features.h
+  // See //theia/matching/create_feature_matcher.h
   MatchingStrategy matching_strategy = MatchingStrategy::BRUTE_FORCE;
 
-  // Options for computing matches between images.
+  // Options for computing matches between images. Two view geometric
+  // verification options are also part of these options.
   // See //theia/matching/feature_matcher_options.h
   FeatureMatcherOptions matching_options;
 
-  // Settings for estimating the relative pose between two images to perform
-  // geometric verification.
-  // See //theia/sfm/verify_two_view_matches.h
-  VerifyTwoViewMatchesOptions geometric_verification_options;
+  // If true, a global image descriptor for each image is used to determine
+  // the k-nearest neighbor images, and feature matchign is only performed on
+  // these k-nearest neighbors. The desired value of "k" is given by setting
+  //   num_nearest_neighbors_for_global_descriptor_matching.
+  bool select_image_pairs_with_global_image_descriptor_matching = true;
+  int num_nearest_neighbors_for_global_descriptor_matching = 100;
+
+  // Specific options for Fisher Vector global feature extraction.
+  int num_gmm_clusters_for_fisher_vector = 16;
+  int max_num_features_for_fisher_vector_training = 1000000;
 
   // Options for estimating the reconstruction.
   // See //theia/sfm/reconstruction_estimator_options.h
   ReconstructionEstimatorOptions reconstruction_estimator_options;
-
-  // If you want the matches to be saved, set this variable to the filename that
-  // you want the matches to be written to. Image names, inlier matches, and
-  // view metadata so that the view graph and tracks may be exactly
-  // recreated.
-  std::string output_matches_file;
 };
 
 // Base class for building SfM reconstructions. This class will manage the
 // entire reconstruction estimation process.
 class ReconstructionBuilder {
  public:
-  explicit ReconstructionBuilder(const ReconstructionBuilderOptions& options);
+  ReconstructionBuilder(
+      const ReconstructionBuilderOptions& options,
+      FeaturesAndMatchesDatabase* features_and_matches_database);
+
+  // If the reconstruction and view graph are already known the reconstruction
+  // builder can take ownership of them and estimate the unestimated views and
+  // tracks in the reconstruction.
+  ReconstructionBuilder(const ReconstructionBuilderOptions& options,
+                        std::unique_ptr<Reconstruction> reconstruction,
+                        std::unique_ptr<ViewGraph> view_graph);
   ~ReconstructionBuilder();
 
   // Add an image to the reconstruction.
   bool AddImage(const std::string& image_filepath);
+  // Same as above, but with the camera intrinsics group specified to enable
+  // shared camera intrinsics.
+  bool AddImage(const std::string& image_filepath,
+                const CameraIntrinsicsGroupId camera_intrinsics_group);
 
   // Same as above, but with the camera priors manually specified.
   bool AddImageWithCameraIntrinsicsPrior(
       const std::string& image_filepath,
       const CameraIntrinsicsPrior& camera_intrinsics_prior);
+  // Same as above, but with the camera intrinsics group specified to enable
+  // shared camera intrinsics.
+  bool AddImageWithCameraIntrinsicsPrior(
+      const std::string& image_filepath,
+      const CameraIntrinsicsPrior& camera_intrinsics_prior,
+      const CameraIntrinsicsGroupId camera_intrinsics_group);
 
   // Add a match to the view graph. Either this method is repeatedly called or
   // ExtractAndMatchFeatures must be called.
@@ -132,16 +167,12 @@ class ReconstructionBuilder {
                        const std::string& image2,
                        const ImagePairMatch& matches);
 
+  // Assignes a mask to an image to indicate the area for keypoints extraction.
+  bool AddMaskForFeaturesExtraction(const std::string& image_filepath,
+                                    const std::string& mask_filepath);
+
   // Extracts features and performs matching with geometric verification.
   bool ExtractAndMatchFeatures();
-
-  // Initializes the reconstruction and view graph explicitly. This method
-  // should be used as an alternative to the Add* methods.
-  //
-  // NOTE: The ReconstructionBuilder takses ownership of the reconstruction and
-  // view graph.
-  void InitializeReconstructionAndViewGraph(Reconstruction* reconstruction,
-                                            ViewGraph* view_graph);
 
   // Estimates a Structure-from-Motion reconstruction using the specified
   // ReconstructionEstimator. Features are first extracted and matched if
@@ -153,13 +184,6 @@ class ReconstructionBuilder {
   bool BuildReconstruction(std::vector<Reconstruction*>* reconstructions);
 
  private:
-  // Matches features and adds the matches to the view graph and feature
-  // correspondences to the track builder.
-  template <class DescriptorType>
-  bool MatchFeatures(
-      const std::vector<std::vector<Keypoint> >& keypoints,
-      const std::vector<std::vector<DescriptorType> >& descriptors);
-
   // Adds the given matches as edges in the view graph.
   void AddMatchToViewGraph(const ViewId view_id1,
                            const ViewId view_id2,
@@ -174,7 +198,7 @@ class ReconstructionBuilder {
   // Removes all uncalibrated views from the reconstruction and view graph.
   void RemoveUncalibratedViews();
 
-  const ReconstructionBuilderOptions options_;
+  ReconstructionBuilderOptions options_;
 
   // SfM objects.
   std::unique_ptr<TrackBuilder> track_builder_;
@@ -183,74 +207,15 @@ class ReconstructionBuilder {
 
   // Container of image information.
   std::vector<std::string> image_filepaths_;
-  std::vector<CameraIntrinsicsPrior> camera_intrinsics_priors_;
 
-  // Exif reader.
-  std::unique_ptr<ExifReader> exif_reader_;
+  // A DB for storing features and matches.
+  FeaturesAndMatchesDatabase* features_and_matches_database_;
+
+  // Module for performing feature extraction and matching.
+  std::unique_ptr<FeatureExtractorAndMatcher> feature_extractor_and_matcher_;
 
   DISALLOW_COPY_AND_ASSIGN(ReconstructionBuilder);
 };
-
-template <class DescriptorType>
-inline bool ReconstructionBuilder::MatchFeatures(
-    const std::vector<std::vector<Keypoint> >& keypoints,
-    const std::vector<std::vector<DescriptorType> >& descriptors) {
-  CHECK_EQ(image_filepaths_.size(), keypoints.size());
-  CHECK_EQ(descriptors.size(), keypoints.size());
-
-  // Set up options.
-  MatchAndVerifyFeaturesOptions match_and_verify_features_options;
-  match_and_verify_features_options.num_threads = options_.num_threads;
-  match_and_verify_features_options.min_num_inlier_matches =
-      options_.min_num_inlier_matches;
-  match_and_verify_features_options.matching_strategy =
-      options_.matching_strategy;
-  match_and_verify_features_options.feature_matcher_options =
-      options_.matching_options;
-  match_and_verify_features_options.geometric_verification_options =
-      options_.geometric_verification_options;
-  match_and_verify_features_options.geometric_verification_options
-      .min_num_inlier_matches = options_.min_num_inlier_matches;
-
-  // Match images and perform geometric verification.
-  std::vector<ImagePairMatch> matches;
-  CHECK(MatchAndVerifyFeatures(match_and_verify_features_options,
-                               camera_intrinsics_priors_,
-                               keypoints,
-                               descriptors,
-                               &matches)) << "Could not match features.";
-  const int num_total_view_pairs =
-      keypoints.size() * (keypoints.size() - 1) / 2;
-  LOG(INFO) << matches.size() << " of " << num_total_view_pairs
-            << " view pairs were matched and geometrically verified.";
-
-  // Get the image names to use as the unique view name.
-  std::vector<std::string> image_filenames(image_filepaths_.size());
-  for (int i = 0; i < image_filenames.size(); i++) {
-    const std::string& image_filepath = image_filepaths_[i];
-    CHECK(GetFilenameFromFilepath(image_filepath, true, &image_filenames[i]));
-  }
-
-  // Write the matches to a file if it exists.
-  if (options_.output_matches_file.length() > 0) {
-    LOG(INFO) << "Writing matches to file: " << options_.output_matches_file;
-    CHECK(WriteMatchesAndGeometry(options_.output_matches_file,
-                                  image_filenames,
-                                  camera_intrinsics_priors_,
-                                  matches))
-        << "Could not write the matches to " << options_.output_matches_file;
-  }
-
-  // Add the matches to the view graph and reconstruction.
-  for (const auto& match : matches) {
-    AddTwoViewMatch(image_filenames[match.image1_index],
-                    image_filenames[match.image2_index],
-                    match);
-  }
-
-  return true;
-}
-
 }  // namespace theia
 
 #endif  // THEIA_SFM_RECONSTRUCTION_BUILDER_H_

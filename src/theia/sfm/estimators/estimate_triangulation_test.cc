@@ -35,9 +35,12 @@
 #include <Eigen/Core>
 #include <vector>
 
-#include "gtest/gtest.h"
-#include "theia/solvers/sample_consensus_estimator.h"
+#include "theia/sfm/camera/camera.h"
 #include "theia/sfm/estimators/estimate_triangulation.h"
+#include "theia/sfm/pose/test_util.h"
+#include "theia/solvers/sample_consensus_estimator.h"
+#include "theia/util/random.h"
+#include "gtest/gtest.h"
 
 namespace theia {
 
@@ -48,64 +51,82 @@ using Eigen::Vector2d;
 using Eigen::Vector3d;
 using Eigen::Vector4d;
 
-void CreateObservations(
-    const int num_observations,
-    const int num_outliers,
-    std::vector<Matrix3x4d>* projection_matrices,
-    std::vector<Vector2d>* features) {
+RandomNumberGenerator rng(151);
+
+void CreateObservations(const int num_observations,
+                        const int num_outliers,
+                        std::vector<Camera>* cameras,
+                        std::vector<Vector2d>* features) {
+  static const double kFocalLength = 1000.0;
+  static const double kPrincipalPointX = 600.0;
+  static const double kPrincipalPointY = 400.0;
   const Vector4d point3d(0, 0, 8, 1.0);
-  projection_matrices->resize(num_observations + num_outliers);
+  cameras->resize(num_observations + num_outliers);
   features->resize(num_observations + num_outliers);
 
   // Initialize a random rotation and position within a 2x2x2 box around the
   // origin.
   for (int i = 0; i < num_observations; i++) {
-    const Matrix3d rotation = Matrix3d::Identity() + 0.1 * Matrix3d::Random();
+    const Matrix3d rotation = RandomRotation(5.0, &rng);
     const Vector3d position =
-        Vector3d::Random() + Vector3d(i / 2.0, i / 2.0, i / 2.0);
-    const Vector3d translation = -rotation * position;
-    projection_matrices->at(i) << rotation, translation;
-    features->at(i) = (projection_matrices->at(i) * point3d).hnormalized();
+        rng.RandVector3d() + Vector3d(i / 2.0, i / 2.0, i / 2.0);
+    Camera camera;
+    camera.SetOrientationFromRotationMatrix(rotation);
+    camera.SetPosition(position);
+    camera.SetFocalLength(kFocalLength);
+    camera.SetPrincipalPoint(kPrincipalPointX, kPrincipalPointY);
+    cameras->at(i) = camera;
+
+    Eigen::Vector2d observed_feature;
+    camera.ProjectPoint(point3d, &observed_feature);
+    features->at(i) = observed_feature;
   }
 
   for (int i = 0; i < num_outliers; i++) {
-    projection_matrices->at(i) = Matrix3x4d::Random();
-    features->at(i) = (projection_matrices->at(i) * point3d).hnormalized();
+    const Matrix3d rotation = RandomRotation(5.0, &rng);
+    const Vector3d position =
+        rng.RandVector3d() + Vector3d(i / 2.0, i / 2.0, i / 2.0);
+    Camera camera;
+    camera.SetOrientationFromRotationMatrix(rotation);
+    camera.SetPosition(position);
+    camera.SetFocalLength(kFocalLength);
+    camera.SetPrincipalPoint(kPrincipalPointX, kPrincipalPointY);
+
+    features->at(i) = rng.RandVector2d(0.0, kFocalLength);
   }
 }
 
 }  // namespace
 
 TEST(EstimateTriangulation, InsufficientObservations) {
-  std::vector<Matrix3x4d> projection_matrices;
+  std::vector<Camera> cameras;
   std::vector<Vector2d> features;
-  CreateObservations(1, 0, &projection_matrices, &features);
+  CreateObservations(1, 0, &cameras, &features);
 
   RansacParameters params;
+  params.min_iterations = 5;
+  params.rng = std::make_shared<RandomNumberGenerator>(rng);
   params.error_thresh = 1.0 * 1.0;
   RansacSummary summary;
   Vector4d triangulated_point;
-  EXPECT_FALSE(EstimateTriangulation(params,
-                                     projection_matrices,
-                                     features,
-                                     &triangulated_point,
-                                     &summary));
+  EXPECT_FALSE(EstimateTriangulation(
+      params, cameras, features, &triangulated_point, &summary));
 }
 
 TEST(EstimateTriangulation, TwoViews) {
-  std::vector<Matrix3x4d> projection_matrices;
+  std::vector<Camera> cameras;
   std::vector<Vector2d> features;
-  CreateObservations(2, 0, &projection_matrices, &features);
+  CreateObservations(2, 0, &cameras, &features);
 
   RansacParameters params;
+  params.min_iterations = 1;
+  params.max_iterations = 2;
+  params.rng = std::make_shared<RandomNumberGenerator>(rng);
   params.error_thresh = 1.0 * 1.0;
   RansacSummary summary;
   Vector4d triangulated_point;
-  EXPECT_TRUE(EstimateTriangulation(params,
-                                    projection_matrices,
-                                    features,
-                                    &triangulated_point,
-                                    &summary));
+  EXPECT_TRUE(EstimateTriangulation(
+      params, cameras, features, &triangulated_point, &summary));
 
   const Vector4d gt_point(0, 0, 8, 1);
   static const double kTolerance = 1e-6;
@@ -115,19 +136,18 @@ TEST(EstimateTriangulation, TwoViews) {
 }
 
 TEST(EstimateTriangulation, WithOutliers) {
-  std::vector<Matrix3x4d> projection_matrices;
+  std::vector<Camera> cameras;
   std::vector<Vector2d> features;
-  CreateObservations(10, 2, &projection_matrices, &features);
+  CreateObservations(10, 2, &cameras, &features);
 
   RansacParameters params;
+  params.min_iterations = 5;
+  params.rng = std::make_shared<RandomNumberGenerator>(rng);
   params.error_thresh = 1.0 * 1.0;
   RansacSummary summary;
   Vector4d triangulated_point;
-  EXPECT_TRUE(EstimateTriangulation(params,
-                                    projection_matrices,
-                                    features,
-                                    &triangulated_point,
-                                    &summary));
+  EXPECT_TRUE(EstimateTriangulation(
+      params, cameras, features, &triangulated_point, &summary));
 
   const Vector4d gt_point(0, 0, 8, 1);
   static const double kTolerance = 1e-6;

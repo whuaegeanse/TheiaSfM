@@ -35,22 +35,35 @@
 #ifndef THEIA_SFM_ESTIMATE_TWOVIEW_INFO_H_
 #define THEIA_SFM_ESTIMATE_TWOVIEW_INFO_H_
 
+#include <memory>
 #include <vector>
+
 #include "theia/sfm/create_and_initialize_ransac_variant.h"
 
 namespace theia {
 
+class RandomNumberGenerator;
+class TwoViewInfo;
 struct CameraIntrinsicsPrior;
 struct FeatureCorrespondence;
-struct TwoViewInfo;
 
 // Options for estimating two view infos.
 struct EstimateTwoViewInfoOptions {
+  // The random number generator used to generate random numbers through the
+  // two-view estimation process. If this is a nullptr then the random generator
+  // will be initialized based on the current time.
+  std::shared_ptr<RandomNumberGenerator> rng;
+
   // Type of Ransac variant to use.
   RansacType ransac_type = RansacType::RANSAC;
 
   // Maximum sampson error in pixels for correspondences to be inliers.
-  double max_sampson_error_pixels = 4.0;
+  //
+  // NOTE: This threshold is with respect to an image that is 1024 pixels
+  // wide. If the image dimensions are larger or smaller than this value then
+  // the threshold will be appropriately scaled. This allows us to use a single
+  // threshold for images of varying resolutions.
+  double max_sampson_error_pixels = 6.0;
 
   // Ransac parameters.
   double expected_ransac_confidence = 0.9999;

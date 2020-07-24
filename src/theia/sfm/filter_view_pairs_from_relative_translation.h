@@ -36,15 +36,20 @@
 #define THEIA_SFM_FILTER_VIEW_PAIRS_FROM_RELATIVE_TRANSLATION_H_
 
 #include <Eigen/Core>
+#include <memory>
 #include <unordered_map>
 
 #include "theia/sfm/types.h"
 
 namespace theia {
-
+class RandomNumberGenerator;
 class ViewGraph;
 
 struct FilterViewPairsFromRelativeTranslationOptions {
+  // Random number generator used to sample from normal distributions to compute
+  // the axis of projection for 1dsfm filtering.
+  std::shared_ptr<RandomNumberGenerator> rng;
+
   // Filtering the translations is embarassingly parallel (each iteration can
   // be run independently) so we can use a thread pool to speed up computation.
   int num_threads = 1;
@@ -56,7 +61,7 @@ struct FilterViewPairsFromRelativeTranslationOptions {
   // The parameter translation_projection_tolerance determines which
   // translations are considered "bad" after analyzing their projections over
   // many iterations (it corresponds to tau in the paper).
-  double translation_projection_tolerance = 0.1;
+  double translation_projection_tolerance = 0.08;
 };
 
 // Filters view pairs based on the relative translation estimations according to

@@ -43,24 +43,28 @@
 #include <OpenGL/OpenGL.h>
 #ifdef FREEGLUT
 #include <GL/freeglut.h>
-#else
+#else  // FREEGLUT
 #include <GLUT/glut.h>
-#endif
-#else
+#endif  // FREEGLUT
+#else  // __APPLE__
 #ifdef _WIN32
 #include <windows.h>
-#endif
+#include <GL/glew.h>
+#include <GL/glut.h>
+#else  // _WIN32
 #define GL_GLEXT_PROTOTYPES 1
 #include <GL/gl.h>
 #include <GL/glu.h>
 #include <GL/glut.h>
-#endif
+#endif  // _WIN32
+#endif  // __APPLE__
 
 DEFINE_string(reconstruction, "", "Reconstruction file to be viewed.");
 
 // Containers for the data.
 std::vector<theia::Camera> cameras;
 std::vector<Eigen::Vector3d> world_points;
+std::vector<Eigen::Vector3f> point_colors;
 std::vector<int> num_views_for_track;
 
 // Parameters for OpenGL.
@@ -70,7 +74,7 @@ int height = 800;
 // OpenGL camera parameters.
 Eigen::Vector3f viewer_position(0.0, 0.0, 0.0);
 float zoom = -50.0;
-float delta_zoom = 25;
+float delta_zoom = 1.1;
 
 // Rotation values for the navigation
 Eigen::Vector2f navigation_rotation(0.0, 0.0);
@@ -99,6 +103,9 @@ void ChangeSize(int w, int h) {
   // Prevent a divide by zero, when window is too short
   // (you cant make a window of zero width).
   if (h == 0) h = 1;
+
+  width = w;
+  height = h;
 
   // Use the Projection Matrix
   glMatrixMode(GL_PROJECTION);
@@ -198,7 +205,7 @@ void DrawPoints(const float point_scale,
 
   // TODO(cmsweeney): Render points with the actual 3D point color! This would
   // require Theia to save the colors during feature extraction.
-  const Eigen::Vector3f default_color(0.05, 0.05, 0.05);
+  //const Eigen::Vector3f default_color(0.05, 0.05, 0.05);
 
   // Enable anti-aliasing for round points and alpha blending that helps make
   // points look nicer.
@@ -217,17 +224,18 @@ void DrawPoints(const float point_scale,
   glPointParameterfv(GL_POINT_DISTANCE_ATTENUATION, point_size_coords);
 
 
-  glColor4f(color_scale * default_color[0],
-            color_scale * default_color[1],
-            color_scale * default_color[2],
-            alpha_scale * default_alpha_scale);
-
   glPointSize(point_scale * default_point_size);
   glBegin(GL_POINTS);
   for (int i = 0; i < world_points.size(); i++) {
     if (num_views_for_track[i] < min_num_views_for_track) {
       continue;
     }
+    const Eigen::Vector3f color = point_colors[i] / 255.0;
+    glColor4f(color_scale * color[0],
+              color_scale * color[1],
+              color_scale * color[2],
+              alpha_scale * default_alpha_scale);
+
     glVertex3d(world_points[i].x(), world_points[i].y(), world_points[i].z());
   }
   glEnd();
@@ -300,9 +308,9 @@ void MouseButton(int button, int state, int x, int y) {
     // Each wheel event reports like a button click, GLUT_DOWN then GLUT_UP
     if (state == GLUT_UP) return;  // Disregard redundant GLUT_UP events
     if (button == 3) {
-      zoom += delta_zoom;
+      zoom *= delta_zoom;
     } else {
-      zoom -= delta_zoom;
+      zoom /= delta_zoom;
     }
   }
 
@@ -363,10 +371,10 @@ void Keyboard(unsigned char key, int x, int y) {
       point_size = 1.0;
       break;
     case 'z':
-      zoom += delta_zoom;
+      zoom *= delta_zoom;
       break;
     case 'Z':
-      zoom -= delta_zoom;
+      zoom /= delta_zoom;
       break;
     case 'p':
       point_size /= 1.2;
@@ -428,14 +436,16 @@ int main(int argc, char* argv[]) {
     cameras.emplace_back(view->Camera());
   }
 
-  // Set up world points.
+  // Set up world points and colors.
   world_points.reserve(reconstruction->NumTracks());
+  point_colors.reserve(reconstruction->NumTracks());
   for (const theia::TrackId track_id : reconstruction->TrackIds()) {
     const auto* track = reconstruction->Track(track_id);
     if (track == nullptr || !track->IsEstimated()) {
       continue;
     }
     world_points.emplace_back(track->Point().hnormalized());
+    point_colors.emplace_back(track->Color().cast<float>());
     num_views_for_track.emplace_back(track->NumViews());
   }
 
@@ -447,6 +457,12 @@ int main(int argc, char* argv[]) {
   glutInitWindowSize(1200, 800);
   glutInitDisplayMode(GLUT_RGB | GLUT_DOUBLE | GLUT_DEPTH);
   glutCreateWindow("Theia Reconstruction Viewer");
+
+#ifdef _WIN32
+  // Set up glew.
+  CHECK_EQ(GLEW_OK, glewInit())
+      << "Failed initializing GLEW.";
+#endif
 
   // Set the camera
   gluLookAt(0.0f, 0.0f, -6.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f);

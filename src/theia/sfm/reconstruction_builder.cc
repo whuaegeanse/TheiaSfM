@@ -39,11 +39,11 @@
 #include <string>
 #include <vector>
 
-#include "theia/image/descriptor/binary_descriptor.h"
+#include "theia/matching/features_and_matches_database.h"
+#include "theia/matching/image_pair_match.h"
+#include "theia/matching/rocksdb_features_and_matches_database.h"
 #include "theia/sfm/camera_intrinsics_prior.h"
-#include "theia/sfm/exif_reader.h"
-#include "theia/sfm/feature_extractor.h"
-#include "theia/sfm/match_and_verify_features.h"
+#include "theia/sfm/feature_extractor_and_matcher.h"
 #include "theia/sfm/reconstruction.h"
 #include "theia/sfm/reconstruction_estimator.h"
 #include "theia/sfm/track_builder.h"
@@ -56,11 +56,36 @@ namespace theia {
 
 namespace {
 
-inline bool IsFloatDescriptor(const DescriptorExtractorType& descriptor_type) {
-  if (descriptor_type == DescriptorExtractorType::SIFT) {
-    return true;
+// Add the view to the reconstruction. If the camera intrinsics group id is set
+// to an invalid group id then simply add the view to the reconstruction without
+// shared camera intrinsics.
+bool AddViewToReconstruction(const std::string& image_filepath,
+                             const CameraIntrinsicsPrior* intrinsics,
+                             const CameraIntrinsicsGroupId intrinsics_group_id,
+                             Reconstruction* reconstruction) {
+  std::string image_filename;
+  CHECK(GetFilenameFromFilepath(image_filepath, true, &image_filename));
+
+  // Add the image to the reconstruction.
+  ViewId view_id;
+  if (intrinsics_group_id == kInvalidCameraIntrinsicsGroupId) {
+    view_id = reconstruction->AddView(image_filename);
+  } else {
+    view_id = reconstruction->AddView(image_filename, intrinsics_group_id);
   }
-  return false;
+
+  if (view_id == kInvalidViewId) {
+    LOG(INFO) << "Could not add " << image_filename
+              << " to the reconstruction.";
+    return false;
+  }
+
+  // Add the camera intrinsics priors if available.
+  if (intrinsics != nullptr) {
+    View* view = reconstruction->MutableView(view_id);
+    *view->MutableCameraIntrinsicsPrior() = *intrinsics;
+  }
+  return true;
 }
 
 Reconstruction* CreateEstimatedSubreconstruction(
@@ -124,62 +149,98 @@ void RemoveEstimatedViewsAndTracks(Reconstruction* reconstruction,
 }  // namespace
 
 ReconstructionBuilder::ReconstructionBuilder(
-    const ReconstructionBuilderOptions& options)
-    : options_(options) {
+    const ReconstructionBuilderOptions& options,
+    std::unique_ptr<Reconstruction> reconstruction,
+    std::unique_ptr<ViewGraph> view_graph)
+    : options_(options),
+      reconstruction_(std::move(reconstruction)),
+      view_graph_(std::move(view_graph)) {
   CHECK_GT(options.num_threads, 0);
+  options_.reconstruction_estimator_options.rng = options.rng;
+}
+
+ReconstructionBuilder::ReconstructionBuilder(
+    const ReconstructionBuilderOptions& options,
+    FeaturesAndMatchesDatabase* features_and_matches_database)
+    : options_(options),
+      features_and_matches_database_(features_and_matches_database) {
+  CHECK_GT(options.num_threads, 0);
+
+  options_.reconstruction_estimator_options.rng = options.rng;
 
   reconstruction_.reset(new Reconstruction());
   view_graph_.reset(new ViewGraph());
-  track_builder_.reset(new TrackBuilder(options.max_track_length));
-  exif_reader_.reset(new ExifReader());
+  track_builder_.reset(
+      new TrackBuilder(options.min_track_length, options.max_track_length));
+
+  // Set up feature extraction and matching.
+  FeatureExtractorAndMatcher::Options feam_options;
+  feam_options.num_threads = options_.num_threads;
+  feam_options.only_calibrated_views = options_.only_calibrated_views;
+  feam_options.num_threads = options_.num_threads;
+  feam_options.descriptor_extractor_type = options_.descriptor_type;
+  feam_options.feature_density = options_.feature_density;
+  feam_options.min_num_inlier_matches = options_.min_num_inlier_matches;
+  feam_options.matching_strategy = options_.matching_strategy;
+  feam_options.feature_matcher_options = options_.matching_options;
+  feam_options.feature_matcher_options.geometric_verification_options
+      .min_num_inlier_matches = options_.min_num_inlier_matches;
+  feam_options.feature_matcher_options.geometric_verification_options
+      .estimate_twoview_info_options.rng = options_.rng;
+
+  // Global descriptor matching settings.
+  feam_options.select_image_pairs_with_global_image_descriptor_matching =
+      options_.select_image_pairs_with_global_image_descriptor_matching;
+  feam_options.num_nearest_neighbors_for_global_descriptor_matching =
+      options_.num_nearest_neighbors_for_global_descriptor_matching;
+  feam_options.num_gmm_clusters_for_fisher_vector =
+      options_.num_gmm_clusters_for_fisher_vector;
+  feam_options.max_num_features_for_fisher_vector_training =
+      options_.max_num_features_for_fisher_vector_training;
+
+  feature_extractor_and_matcher_.reset(new FeatureExtractorAndMatcher(
+      feam_options, features_and_matches_database_));
 }
 
 ReconstructionBuilder::~ReconstructionBuilder() {}
 
 bool ReconstructionBuilder::AddImage(const std::string& image_filepath) {
-  // Extract the metadata. If this method fails it means the file does not
-  // exist.
-  CameraIntrinsicsPrior camera_intrinsics_prior;
-  CHECK(exif_reader_->ExtractEXIFMetadata(image_filepath,
-                                          &camera_intrinsics_prior))
-      << "Could not extract camera_intrinsics_prior from " << image_filepath;
-  return AddImageWithCameraIntrinsicsPrior(image_filepath,
-                                          camera_intrinsics_prior);
+  return AddImage(image_filepath, kInvalidCameraIntrinsicsGroupId);
+}
+
+bool ReconstructionBuilder::AddImage(
+    const std::string& image_filepath,
+    const CameraIntrinsicsGroupId camera_intrinsics_group) {
+  image_filepaths_.emplace_back(image_filepath);
+  if (!AddViewToReconstruction(image_filepath,
+                               NULL,
+                               camera_intrinsics_group,
+                               reconstruction_.get())) {
+    return false;
+  }
+  return feature_extractor_and_matcher_->AddImage(image_filepath);
 }
 
 bool ReconstructionBuilder::AddImageWithCameraIntrinsicsPrior(
     const std::string& image_filepath,
     const CameraIntrinsicsPrior& camera_intrinsics_prior) {
+  return AddImageWithCameraIntrinsicsPrior(
+      image_filepath, camera_intrinsics_prior, kInvalidCameraIntrinsicsGroupId);
+}
+
+bool ReconstructionBuilder::AddImageWithCameraIntrinsicsPrior(
+    const std::string& image_filepath,
+    const CameraIntrinsicsPrior& camera_intrinsics_prior,
+    const CameraIntrinsicsGroupId camera_intrinsics_group) {
   image_filepaths_.emplace_back(image_filepath);
-  camera_intrinsics_priors_.emplace_back(camera_intrinsics_prior);
-
-  std::string image_file;
-  CHECK(GetFilenameFromFilepath(image_filepath, true, &image_file));
-
-  // Add the image to the reconstruction.
-  const ViewId view_id = reconstruction_->AddView(image_file);
-  if (view_id == kInvalidViewId) {
-    LOG(INFO) << "Could not add " << image_file << " to the reconstruction.";
+  if (!AddViewToReconstruction(image_filepath,
+                               &camera_intrinsics_prior,
+                               camera_intrinsics_group,
+                               reconstruction_.get())) {
     return false;
   }
-
-  // Set the view priors.
-  View* view = reconstruction_->MutableView(view_id);
-  *view->MutableCameraIntrinsicsPrior() = camera_intrinsics_prior;
-
-  if (camera_intrinsics_prior.focal_length.is_set) {
-    LOG(INFO) << "Adding image " << image_file
-              << " to reconstruction with focal length: "
-              << camera_intrinsics_prior.focal_length.value;
-  } else if (!options_.only_calibrated_views) {
-    LOG(INFO) << "Adding image " << image_file
-              << " to reconstruction with focal length: UNKNOWN";
-  } else {
-    LOG(INFO) << "Image " << image_file
-              << " did not contain an EXIF focal length. Skipping this image.";
-  }
-
-  return true;
+  return feature_extractor_and_matcher_->AddImage(image_filepath,
+                                                  camera_intrinsics_prior);
 }
 
 void ReconstructionBuilder::RemoveUncalibratedViews() {
@@ -193,65 +254,70 @@ void ReconstructionBuilder::RemoveUncalibratedViews() {
   }
 }
 
+bool ReconstructionBuilder::AddMaskForFeaturesExtraction(
+    const std::string& image_filepath, const std::string& mask_filepath) {
+  feature_extractor_and_matcher_->AddMaskForFeaturesExtraction(image_filepath,
+                                                               mask_filepath);
+  return true;
+}
+
 bool ReconstructionBuilder::ExtractAndMatchFeatures() {
   CHECK_EQ(view_graph_->NumViews(), 0) << "Cannot call ExtractAndMatchFeatures "
                                           "after TwoViewMatches has been "
                                           "called.";
-  // If we only want calibrated views remove them from the reconstruction so
-  // that they no features are detected and matched between them.
-  if (options_.only_calibrated_views) {
-    // We iterate in the reverse order so that the erase() function does not
-    // disturb the iterating.
-    for (int i = image_filepaths_.size() - 1; i >= 0; --i) {
-      if (!camera_intrinsics_priors_[i].focal_length.is_set) {
-        image_filepaths_.erase(image_filepaths_.begin() + i);
-        camera_intrinsics_priors_.erase(camera_intrinsics_priors_.begin() + i);
-      }
-    }
+
+  // TODO: Remove all references to matches variable and replace with db
+  // functions.
+
+  // Extract features and obtain the feature matches.
+  feature_extractor_and_matcher_->ExtractAndMatchFeatures();
+  feature_extractor_and_matcher_.release();
+
+  // Log how many view pairs were geometrically verified.
+  const int num_total_view_pairs =
+      image_filepaths_.size() * (image_filepaths_.size() - 1) / 2;
+  LOG(INFO) << features_and_matches_database_->NumMatches() << " of "
+            << num_total_view_pairs
+            << " view pairs were matched and geometrically verified.";
+
+  // Add the EXIF metadata to each view.
+  std::vector<std::string> image_filenames(image_filepaths_.size());
+  const auto image_names_of_calibration =
+      features_and_matches_database_->ImageNamesOfCameraIntrinsicsPriors();
+  for (int i = 0; i < image_names_of_calibration.size(); i++) {
+    // Add the camera intrinsic prior information to the view.
+    const ViewId view_id =
+        reconstruction_->ViewIdFromName(image_names_of_calibration[i]);
+    View* view = reconstruction_->MutableView(view_id);
+    const auto intrinsics_prior =
+        features_and_matches_database_->GetCameraIntrinsicsPrior(
+            image_names_of_calibration[i]);
+    *view->MutableCameraIntrinsicsPrior() = intrinsics_prior;
   }
 
-  std::vector<std::vector<Keypoint> > keypoints;
-  FeatureExtractorOptions feature_extractor_options;
-  feature_extractor_options.num_threads = options_.num_threads;
-  feature_extractor_options.descriptor_extractor_type =
-      options_.descriptor_type;
-  feature_extractor_options.sift_parameters = options_.sift_parameters;
-  FeatureExtractor feature_extractor(feature_extractor_options);
+  ///////////////////////////////////
+  //
+  // TODO: How to save the camera intrinsics priors????
+  //
+  ///////////////////////////////////
 
-  bool success = false;
-  if (IsFloatDescriptor(options_.descriptor_type)) {
-    std::vector<std::vector<Eigen::VectorXf> > float_descriptors;
-
-    // Extract and match floating point descriptors.
-    LOG(INFO) << "Extracting features.";
-    CHECK(feature_extractor.Extract(image_filepaths_,
-                                    &keypoints,
-                                    &float_descriptors))
-        << "Could not extract features.";
-
-    LOG(INFO) << "Matching features.";
-    success = MatchFeatures(keypoints, float_descriptors);
-  } else {
-    std::vector<std::vector<BinaryVectorX> > binary_descriptors;
-
-    LOG(INFO) << "Extracting features.";
-    // Extract and match binary descriptors.
-    CHECK(feature_extractor.Extract(image_filepaths_,
-                                    &keypoints,
-                                    &binary_descriptors))
-        << "Could not extract features.";
-
-    LOG(INFO) << "Matching features.";
-    success = MatchFeatures(keypoints, binary_descriptors);
+  // Add the matches to the view graph and reconstruction.
+  const auto& match_keys =
+      features_and_matches_database_->ImageNamesOfMatches();
+  for (const auto& match_key : match_keys) {
+    const ImagePairMatch& match =
+        features_and_matches_database_->GetImagePairMatch(match_key.first,
+                                                          match_key.second);
+    AddTwoViewMatch(match_key.first, match_key.second, match);
   }
 
-  return success;
+  return true;
 }
 
 bool ReconstructionBuilder::AddTwoViewMatch(const std::string& image1,
                                             const std::string& image2,
                                             const ImagePairMatch& matches) {
-// Get view ids from names and check that the views are valid (i.e. that
+  // Get view ids from names and check that the views are valid (i.e. that
   // they have been added to the reconstruction).
   const ViewId view_id1 = reconstruction_->ViewIdFromName(image1);
   const ViewId view_id2 = reconstruction_->ViewIdFromName(image2);
@@ -279,12 +345,6 @@ bool ReconstructionBuilder::AddTwoViewMatch(const std::string& image1,
   AddTracksForMatch(view_id1, view_id2, matches);
 
   return true;
-}
-
-void ReconstructionBuilder::InitializeReconstructionAndViewGraph(
-    Reconstruction* reconstruction, ViewGraph* view_graph) {
-  reconstruction_.reset(std::move(reconstruction));
-  view_graph_.reset(std::move(view_graph));
 }
 
 bool ReconstructionBuilder::BuildReconstruction(
@@ -321,17 +381,18 @@ bool ReconstructionBuilder::BuildReconstruction(
       return reconstructions->size() > 0;
     }
 
-    LOG(INFO)
-        << "\nReconstruction estimation statistics: "
-        << "\n\tNum estimated views = " << summary.estimated_views.size()
-        << "\n\tNum input views = " << reconstruction_->NumViews()
-        << "\n\tNum estimated tracks = " << summary.estimated_tracks.size()
-        << "\n\tNum input tracks = " << reconstruction_->NumTracks()
-        << "\n\tPose estimation time = " << summary.pose_estimation_time
-        << "\n\tTriangulation time = " << summary.triangulation_time
-        << "\n\tBundle Adjustment time = " << summary.bundle_adjustment_time
-        << "\n\tTotal time = " << summary.total_time
-        << "\n\n" << summary.message;
+    LOG(INFO) << "\nReconstruction estimation statistics: "
+              << "\n\tNum estimated views = " << summary.estimated_views.size()
+              << "\n\tNum input views = " << reconstruction_->NumViews()
+              << "\n\tNum estimated tracks = "
+              << summary.estimated_tracks.size()
+              << "\n\tNum input tracks = " << reconstruction_->NumTracks()
+              << "\n\tPose estimation time = " << summary.pose_estimation_time
+              << "\n\tTriangulation time = " << summary.triangulation_time
+              << "\n\tBundle Adjustment time = "
+              << summary.bundle_adjustment_time
+              << "\n\tTotal time = " << summary.total_time << "\n\n"
+              << summary.message;
 
     // Remove estimated views and tracks and attempt to create a reconstruction
     // from the remaining unestimated parts.
@@ -358,9 +419,8 @@ void ReconstructionBuilder::AddMatchToViewGraph(
     const ViewId view_id2,
     const ImagePairMatch& image_matches) {
   // Add the view pair to the reconstruction. The view graph requires the two
-  // view info
-  // to specify the transformation from the smaller view id to the larger view
-  // id. We swap the cameras here if that is not already the case.
+  // view info to specify the transformation from the smaller view id to the
+  // larger view id. We swap the cameras here if that is not already the case.
   TwoViewInfo twoview_info = image_matches.twoview_info;
   if (view_id1 > view_id2) {
     SwapCameras(&twoview_info);
@@ -373,8 +433,8 @@ void ReconstructionBuilder::AddTracksForMatch(const ViewId view_id1,
                                               const ViewId view_id2,
                                               const ImagePairMatch& matches) {
   for (const auto& match : matches.correspondences) {
-    track_builder_->AddFeatureCorrespondence(view_id1, match.feature1,
-                                             view_id2, match.feature2);
+    track_builder_->AddFeatureCorrespondence(
+        view_id1, match.feature1, view_id2, match.feature2);
   }
 }
 

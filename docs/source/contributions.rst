@@ -17,9 +17,9 @@ Style and Testing
 =================
 
 We follow Google's `C++ Style Guide
-<http://google-styleguide.googlecode.com/svn/trunk/cppguide.xml>`_ and use git
-for version control. We use `Gerrit <https://code.google.com/p/gerrit/>`_ to
-review changes before commits. The git repository has been set up with
+<https://google.github.io/styleguide/cppguide.html>`_ and use git for version
+control. We use `Gerrit <https://code.google.com/p/gerrit/>`_ to review changes
+before commits. The git repository has been set up with
 `GerritHub <http://gerrithub.io/>`_ so that the repository lives in GitHub, but
 all reviews are performed with Gerrit.
 
@@ -71,7 +71,7 @@ project.
 
    .. code-block:: bash
 
-      curl -o .git/hooks/commit-msg http://cs.ucsb.edu/~cmsweeney/theia/commit-msg
+      curl -o .git/hooks/commit-msg http://www.theia-sfm.org/_static/commit-msg
       chmod +x .git/hooks/commit-msg
 
 5. Configure your GerritHub password.

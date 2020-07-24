@@ -39,10 +39,11 @@ namespace theia {
 
 class Reconstruction;
 
-// Sets the camera intrinsics from the CameraIntrinsicsPrior of each view. Views
-// that do not have a focal length prior will set a value corresponding to a
-// median viewing angle. Principal points that are not provided by the priors
-// are simply initialized as half of the corresponding image size dimension.
+// Sets the camera intrinsics from the CameraIntrinsicsPrior for every view in
+// the reconstruction. If the prior does not have a focal length prior then the
+// focal length will be set to a value corresponding to a median viewing
+// angle. Principal points that are not provided by the priors are simply
+// initialized as half of the corresponding image size dimension.
 void SetCameraIntrinsicsFromPriors(Reconstruction* reconstruction);
 
 }  // namespace theia

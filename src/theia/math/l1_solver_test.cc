@@ -71,7 +71,6 @@ TEST(L1Solver, SmallProblem) {
 
   // Recover the code word.
   L1Solver<Eigen::MatrixXd>::Options options;
-  options.duality_gap_tolerance = 1e-8;
   options.max_num_iterations = 100;
   L1Solver<Eigen::MatrixXd> l1_solver(options, lhs);
   l1_solver.Solve(rhs, &solution);
@@ -92,28 +91,33 @@ TEST(L1Solver, SmallProblem) {
 // This example is taken from the L1-magic library. It is formulated as a
 // codeword recovery problem.
 TEST(L1Solver, Decoding) {
+  RandomNumberGenerator rng(94);
   static const double kTolerance = 1e-8;
 
   static const int source_length = 256;
   static const int codeword_length = 4 * source_length;
   static const int num_pertubations = 0.2 * codeword_length;
 
-  const Eigen::MatrixXd mat =
-      Eigen::MatrixXd::Random(codeword_length, source_length);
-  const Eigen::VectorXd source_word = Eigen::VectorXd::Random(source_length);
+  Eigen::MatrixXd mat(codeword_length, source_length);
+  rng.SetRandom(&mat);
+  Eigen::VectorXd source_word(source_length);
+  rng.SetRandom(&source_word);
   const Eigen::VectorXd code_word = mat * source_word;
 
   // Apply random pertubations to the initial guess.
   Eigen::VectorXd observation = code_word;
-  Eigen::VectorXd pertubations = Eigen::VectorXd::Random(num_pertubations);
+  Eigen::VectorXd pertubations(num_pertubations);
+  rng.SetRandom(&pertubations);
+  pertubations *= 0.5;
   for (int i = 0; i < num_pertubations; i++) {
-    const int rand_entry = RandInt(0, observation.size() - 1);
+    const int rand_entry = rng.RandInt(0, observation.size() - 1);
     observation(rand_entry) = pertubations(i);
   }
 
   // Recover the code word.
   L1Solver<Eigen::MatrixXd>::Options options;
-  options.duality_gap_tolerance = 1e-8;
+  options.absolute_tolerance = 1e-8;
+  options.relative_tolerance = 1e-8;
   L1Solver<Eigen::MatrixXd> l1_solver(options, mat);
   // Set the initial noisy guess.
   Eigen::VectorXd solution =

@@ -35,6 +35,11 @@
 #ifndef THEIA_IMAGE_KEYPOINT_DETECTOR_KEYPOINT_H_
 #define THEIA_IMAGE_KEYPOINT_DETECTOR_KEYPOINT_H_
 
+#include <cereal/access.hpp>
+#include <cereal/cereal.hpp>
+#include <cereal/types/common.hpp>
+#include <cereal/types/vector.hpp>
+#include <stdint.h>
 #include <vector>
 
 namespace theia {
@@ -47,9 +52,8 @@ class Keypoint {
   enum KeypointType {
     INVALID = -1,
     OTHER = 0,
-    SIFT,
-    AGAST,
-    BRISK
+    SIFT = 1,
+    AKAZE = 2,
   };
 
   Keypoint(double x, double y, KeypointType type)
@@ -101,8 +105,18 @@ class Keypoint {
   double strength_;
   double scale_;
   double orientation_;
+
+  // Templated method for disk I/O with cereal. This method tells cereal which
+  // data members should be used when reading/writing to/from disk.
+  friend class cereal::access;
+  template <class Archive>
+  void serialize(Archive& ar, const std::uint32_t version) {  // NOLINT
+    ar(x_, y_, keypoint_type_, strength_, scale_, orientation_);
+  }
 };
 
 }  // namespace theia
+
+CEREAL_CLASS_VERSION(theia::Keypoint, 0);
 
 #endif  // THEIA_IMAGE_KEYPOINT_DETECTOR_KEYPOINT_H_

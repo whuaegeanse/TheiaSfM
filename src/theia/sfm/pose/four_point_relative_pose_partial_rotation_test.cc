@@ -58,6 +58,8 @@ using Eigen::Matrix3d;
 using Eigen::Quaterniond;
 using Eigen::Vector3d;
 
+RandomNumberGenerator rng(61);
+
 // Tests that the four point pose works correctly by taking the passed
 // points_3d, projecting them to view_1_origins to get image one rays,
 // transforming by (expected_rotation, expected_translation) to get
@@ -89,8 +91,8 @@ void TestFourPointResultWithNoise(const Vector3d& axis,
   }
   if (projection_noise_std_dev) {
     for (int i = 0; i < 4; ++i) {
-      AddNoiseToRay(projection_noise_std_dev, &image_one_rays[i]);
-      AddNoiseToRay(projection_noise_std_dev, &image_two_rays[i]);
+      AddNoiseToRay(projection_noise_std_dev, &rng, &image_one_rays[i]);
+      AddNoiseToRay(projection_noise_std_dev, &rng, &image_two_rays[i]);
     }
   }
   std::vector<Quaterniond> soln_rotations;
@@ -229,10 +231,8 @@ TEST(FourPointEssentialMatrixTest, NoiseTest) {
     Vector3d(6.0, 3.0, 2.0), Vector3d(13.0, 1.0, 15.0)
   };
 
-  InitRandomGenerator();
-
   for (int transform_index = 0;
-       transform_index < ARRAYSIZE(kAxes);
+       transform_index < THEIA_ARRAYSIZE(kAxes);
        ++transform_index) {
     Quaterniond kExpectedRotation(
         AngleAxisd(DegToRad(kAngles[transform_index]), kAxes[transform_index]));
@@ -301,10 +301,10 @@ TEST(FourPointEssentialMatrixTest, IncorrectAxisTest) {
   };
 
   for (int transform_index = 0;
-       transform_index < ARRAYSIZE(kAxes);
+       transform_index < THEIA_ARRAYSIZE(kAxes);
        ++transform_index) {
     for (int axis_rotation_index = 0;
-         axis_rotation_index < ARRAYSIZE(kAxisPerturbations);
+         axis_rotation_index < THEIA_ARRAYSIZE(kAxisPerturbations);
          ++axis_rotation_index) {
       // Perturbs the axis by the axis perturbation.
       const Vector3d perturbed_axis =

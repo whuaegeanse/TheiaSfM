@@ -10,30 +10,27 @@ Theia can be used for your own applications. Only minimal documentation is
 provided here, but a full description of command line arguments and more can be
 found within each application file.
 
+The general way to run each of the applications (after building Theia) is by running the executables and supplying the required command line flags. The command line flags may be determined by running the executable followed by ``--helpshort``. This will supply a list of required command line flags with a short description of their meaning, as well as the default parameters. When many flags are required to run a program, it is advisable to put all the flags into a single .txt file and supply them as a "flagfile" such as:
+
+.. code-block:: bash
+
+  ./bin/build_reconstruction --flagfile=build_reconstruction_flags.txt
+
+In order to view the logging that Theia provides (which can be extremely useful!) you will have to add the command line flag ``--logtostderr``
+
+
 Features
 ========
 
 Extract Features
 ----------------
 
-Extract any type of feature that is implemented in Theia (SIFT, BRIEF, BRISK,
-FREAK) and display the feature matches by outputting the images and
-features. The feature type and number of threads can be set at runtime.
+Extract any type of feature that is implemented in Theia (e.g., SIFT) and write
+them to disk.
 
 .. code-block:: bash
 
-  ./bin/extract_features --input_imgs=/path/to/images/*.jpg --img_output_dir=/path/to/output --num_threads=4 --descriptor=SIFT
-
-Match Descriptors
------------------
-
-Given an input set of images, this program will match descriptors between all
-images. Many parameters can be set at runtime, and the matched images are
-written to a specified output directory.
-
-.. code-block:: bash
-
-  ./bin/match_descriptors --input_imgs=/path/to/images/*.jpg --img_output_dir=/path/to/output --num_threads=4 --descriptor=SIFT --matcher=brute_force --lowes_ratio=0.8
+  ./bin/extract_features --input_images=/path/to/images/*.jpg --features_output_director=/path/to/output --num_threads=4 --descriptor=SIFT --logtostderr
 
 Reconstructions
 ===============
@@ -44,15 +41,17 @@ Build Reconstruction
 This application will build a 3D reconstruction from a set of images or a set of
 image matches. Detailed documentation for the structure-from-motion pipeline can
 be found at :ref:`chapter-sfm`. Many parameters can be set at runtime (too many
-to list here), and we provide an example of the possible settings in
-applications/build_reconstruction_flags.txt. This flags file may be run by
-executing the command:
+to list here).
+
+.. NOTE:: We provide an example of the possible command line flags for ``build_reconstructions`` in applications/build_reconstruction_flags.txt. We highly recommend that you copy this file then adjust the parameters for your own dataset and settings.
+
+Once you have your flags file, you may create a 3D reconstruction by executing the command:
 
 .. code-block:: bash
 
-  ./bin/build_reconstruction --flagfile=/path/to/build_reconstructions_flags.txt
+  ./bin/build_reconstruction --flagfile=/path/to/build_reconstruction_flags.txt
 
-The reconstruction parameters may need to be tuned a bit
+The reconstruction parameters may need to be tuned a bit for the individual datasets.
 
 If images are supplied as input, then features are extracted and matched between
 images before the reconstruction process begins. It is advised that you save
@@ -62,6 +61,57 @@ geometry. This allows you to tune the reconstruction parameters without having
 to wait for image matching which is typically the slowest part of
 structure-from-motion. Alternatively, you could first generate the two view
 geometry and save the information using the program below.
+
+1DSfM Dataset
+-------------
+
+The `1DSfM dataset <http://www.cs.cornell.edu/projects/1dsfm/>`_ is an excellent
+dataset for SfM reconstructions from internet photo collections and is a
+benchmark dataset for medium to large-scale SfM reconstructions. Since Theia is
+aimed to make research and experimentation simple, we have provided an interface
+to directly utilize the 1DSfM datasets without having to worry about processing
+the data yourself.
+
+.. NOTE:: We provide an example of the possible command line flags for ``build_1dsfm_reconstructions`` in applications/build_1dsfm_reconstruction_flags.txt. We highly recommend that you copy this file then adjust the parameters for your own dataset and settings.
+
+By running the following command, you can utilize Theia's reconstruction
+pipeline directly on the 1DSfM dataset:
+
+.. code-block:: bash
+
+   ./bin/build_1dsfm_reconstruction --flagfile=/path/to/build_1dsfm_reconstruction_flags.txt
+
+Comparing Reconstructions
+-------------------------
+
+After computing SfM reconstructions, it can be useful to compare them. For
+example, two reconstructions may be created with different parameters then
+compared to determine how the various parameters affect reconstruction
+quality. Running this program will output statistics such as rotation different,
+positions difference, and the difference between camera intrinsic parameters.
+
+.. code-block:: bash
+
+   ./bin/compare_reconstructions --reference_reconstruction=ground_truth_reconstruction --reconstruction_to_align=your_reconstruction --logtostderr
+
+Note that reference_reconstruction is considered the "ground truth" reconstruction for
+this application. The reconstruction in reconstruction_to_align is aligned to
+reference_reconstruction with a similarity transformation (aligning the cameras with the
+same name in both reconstructions) then the errors are measured.
+
+For the 1DSfM dataset, you can use the ``compare_reconstructions`` application
+to determine the ground truth errors. First, use the ``convert_bundle_file``
+application to convert the ground truth Bundler files that come with the 1DSfM
+dataset of interest. Then compare the reconstruction computed with Theia to the
+ground truth reconstruction using the command line above. Since the ground truth
+1DSfM bundler files are roughly metric-scale, the positions errors will be
+approximately in meters.
+
+Similarly, for the Strecha Dataset, you can first create a ground truth
+reconstruction with the ``create_reconstruction_from_strecha_dataset``
+program. Then use this as the ground truth reconstruction for
+``compare_reconstructions``. Similar to the 1DSfM datasets, the ground truth
+Strecha reconstructions are metric-scale and so are the position errors.
 
 Compute Two View Geometry
 -------------------------
@@ -80,6 +130,24 @@ Compute Reconstruction Statistics
 Computes some basic information about reconstructions such as reprojection
 error, number of cameras, 3D points, and the average number of observations per
 3D point.
+
+.. code-block:: bash
+
+   ./bin/compute_reconstruction_statistics --reconstruction=my_reconstruction --logtostderr
+
+Compute Matching Relative Pose Errors
+-------------------------------------
+
+Two-view matches are the input to SfM, so the quality of the matches is
+important to the final quality of the SfM reconstruction. To evaluate the
+accuracy of various matching strategies (e.g., brute force vs cascade hashing,
+or whether to perform two-view bundle adjustment), you can compare the input
+two-view matches and geometry to the final reconstruction.
+
+.. code-block:: bash
+
+   ./bin/compute_matching_relative_pose_errors --matches=matches_file --reconstruction=ground_truth_reconstruction --logtostderr
+
 
 View Reconstruction
 -------------------
@@ -136,12 +204,20 @@ Create Calibration File From EXIF
 Creates a calibration file from the EXIF information that can be
 extracted from an image set.
 
-Convert Bundle File
--------------------
+.. code-block:: bash
 
-Converts a bundler reconstruction to a Theia :class:`Reconstruction`.
+  ./bin/create_calibration_file_from_exif --images=/path/to/images/*.jpg --output_calibration_file=/path/to/output/calibration.txt
 
-Convert Sift Key File
----------------------
+Converting to Bundler and NVM formats
+-------------------------------------
 
-Converts Lowe's SIFT key files to a binary format.
+We provide conversion to to and from Bundler and NVM files. Take a look at convert_bundle_file.cc, convert_nvm_file.cc, convert_theia_reconstruction_to_bundler_file.cc, and export_to_nvm_file.cc.
+
+Additionally, we provide at tool to convert the Theia reconstruction to the PMVS format in the export_reconstruction_to_pmvs.cc.
+
+Calibrate Camera Intrinsics
+---------------------------
+
+Often it is difficult to obtain good camera calibration, and personally I have never found OpenCV's calibration to work as reliably as I would like (particularly for fisheye lenses). I have written a simple calibration tool that takes in images and runs incremental SfM while optimizing camera intrinsics. Then, the optimized intrinsics are used as the priors for a fresh restart of incremental SfM and the process is repeated for several iterations. The final calibration is printed as upon termination.
+
+The calibration toolkit has worked well for me if the input is a well textured scene. You may supply which camera model you would like to use, and many other parameters that may be found in the ``calibrate_camera_intrinsics_flags.txt`` file. Please use this flags file as your starting point when using the calibration module.

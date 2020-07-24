@@ -36,6 +36,7 @@
 
 #include <Eigen/Core>
 #include <glog/logging.h>
+#include <stdint.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -43,6 +44,8 @@
 #include <iostream>  // NOLINT
 #include <string>
 #include <vector>
+
+#include "theia/image/keypoint_detector/keypoint.h"
 
 namespace theia {
 
@@ -63,6 +66,9 @@ bool ReadSiftKeyTextFile(const std::string& sift_key_file,
 
   FILE* fp = fopen(sift_key_file.c_str(), "r");
   int num_descriptors, len;
+  if (fp == nullptr) {
+    return false;
+  }
 
   if (fscanf(fp, "%d %d", &num_descriptors, &len) != 2) {
     printf("Invalid keypoint file\n");

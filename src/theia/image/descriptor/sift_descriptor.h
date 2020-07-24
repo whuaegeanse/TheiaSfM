@@ -38,30 +38,27 @@
 extern "C" {
 #include <vl/sift.h>
 }
+
+#include <memory>
 #include <vector>
 
 #include "theia/image/descriptor/descriptor_extractor.h"
-#include "theia/image/keypoint_detector/keypoint.h"
 #include "theia/image/keypoint_detector/sift_parameters.h"
 #include "theia/util/util.h"
 
 namespace theia {
 
-template<class T> class Image;
-typedef Image<float> FloatImage;
+class FloatImage;
+class Keypoint;
 
-class SiftDescriptorExtractor : public FloatDescriptorExtractor {
+class SiftDescriptorExtractor : public DescriptorExtractor {
  public:
   //  We only implement the standard 128-dimension descriptor. Specify the
   //  number of image octaves, number of scale levels per octave, and where the
   //  first octave should start.
-  explicit SiftDescriptorExtractor(const SiftParameters& detector_params) :
-      sift_params_(detector_params), sift_filter_(nullptr) {}
-  SiftDescriptorExtractor(int num_octaves, int num_levels, int first_octave)
-      : sift_params_(num_octaves, num_levels, first_octave, 10.0f,
-                     255.0 * 0.02 / num_levels),
-        sift_filter_(nullptr) {}
-  SiftDescriptorExtractor() : SiftDescriptorExtractor(-1, 3, -1) {}
+  explicit SiftDescriptorExtractor(const SiftParameters& detector_params);
+  SiftDescriptorExtractor(int num_octaves, int num_levels, int first_octave);
+  SiftDescriptorExtractor();
   ~SiftDescriptorExtractor();
 
   // Computes a descriptor at a single keypoint.
@@ -76,15 +73,16 @@ class SiftDescriptorExtractor : public FloatDescriptorExtractor {
 
   // Detect keypoints using the Sift keypoint detector and extracts them at the
   // same time.
-  bool DetectAndExtractDescriptors(
-      const FloatImage& image,
-      std::vector<Keypoint>* keypoints,
-      std::vector<Eigen::VectorXf>* descriptors);
+  bool DetectAndExtractDescriptors(const FloatImage& image,
+                                   std::vector<Keypoint>* keypoints,
+                                   std::vector<Eigen::VectorXf>* descriptors);
+
+  // This method is only public so that we can easily test it.
+  static void ConvertToRootSift(Eigen::VectorXf* descriptor);
 
  private:
   const SiftParameters sift_params_;
-  VlSiftFilt* sift_filter_;
-
+  std::unique_ptr<VlSiftFilt, void (*)(VlSiftFilt*)> sift_filter_;
   DISALLOW_COPY_AND_ASSIGN(SiftDescriptorExtractor);
 };
 

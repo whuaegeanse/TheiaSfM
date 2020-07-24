@@ -43,6 +43,7 @@
 #include "theia/solvers/estimator.h"
 #include "theia/solvers/evsac.h"
 #include "theia/sfm/pose/four_point_homography.h"
+#include "theia/util/random.h"
 #include "theia/test/test_utils.h"
 
 namespace theia {
@@ -56,6 +57,9 @@ using Eigen::MatrixXd;
 using Eigen::Matrix3d;
 
 namespace {
+
+RandomNumberGenerator rng(60);
+
 // Rayleigh samples taken from MATLAB with sigma=1.
 const vector<double> rayl_samples = {
   9.442826e-01, 1.571453e+00, 9.874990e-01, 1.803729e+00, 7.826802e-01,
@@ -297,7 +301,7 @@ class HomographyEstimator : public Estimator<Correspondence, Matrix3d> {
   HomographyEstimator() {}
   ~HomographyEstimator() {}
 
-  double SampleSize() const { return 4; }
+  double SampleSize() const override { return 4; }
 
   bool EstimateModel(const vector<Correspondence>& data,
                      vector<Matrix3d>* models) const override {
@@ -362,11 +366,12 @@ TEST(EvsacSamplerTest, MixtureModelParamsCalculation) {
   // Reversed GEV parameters gev = [0.0148 4.1872 -84.7617].
   EvsacSampler<Vector2d>::MixtureModelParams mixture_model_params;
   vector<float> probabilities;
+  vector<float> sampling_weights;
   const MatrixXd distances =
       Eigen::Map<const MatrixXd>(&mixture_samples[0], 50, 6);
   EvsacSampler<Vector2d>::CalculateMixtureModel(
       distances, kPredictorThreshold, MLE,
-      &mixture_model_params, &probabilities);
+      &mixture_model_params, &probabilities, &sampling_weights);
   // Checking mixture model params.
   // Checking Gamma parameters.
   EXPECT_NEAR(mixture_model_params.k, 3.2807, 0.1);
@@ -377,10 +382,10 @@ TEST(EvsacSamplerTest, MixtureModelParamsCalculation) {
   EXPECT_NEAR(mixture_model_params.mu, -84.7617, 0.1);
   // Checking inlier ratio.
   EXPECT_NEAR(mixture_model_params.inlier_ratio, 1.0, 0.1);
-  // Check that probabilities are high and non zero!
+  // Check that sampling weights are high and non zero!
   float avg_p = 0.0f;
-  for (const float p : probabilities) avg_p += p;
-  avg_p /= probabilities.size();
+  for (const float p : sampling_weights) avg_p += p;
+  avg_p /= sampling_weights.size();
   EXPECT_GT(avg_p, 0.95);
   VLOG(1) << "Average probability: " << avg_p;
 }
@@ -413,6 +418,7 @@ TEST(EvsacTest, HomographyEstimationWithEvsacSampling) {
   HomographyEstimator homography_estimator;
   Matrix3d homography;
   RansacParameters params;
+  params.rng = std::make_shared<RandomNumberGenerator>(rng);
   params.error_thresh = 5.0;  // 5px of error
   const double kPredictorThreshold = 0.65;
   Evsac<HomographyEstimator> evsac_homography(

@@ -7,7 +7,7 @@
 Theia
 =====
 
-Theia is a computer vision library developed by `Chris Sweeney <http://cs.ucsb.edu/~cmsweeney>`_ aimed at providing efficient and reliable
+Theia is a computer vision library developed by `Chris Sweeney <http://homes.cs.washington.edu/~csweeney>`_ aimed at providing efficient and reliable
 algorithms for Structure from Motion (SfM). The goal of this library is to provide researchers with an out of the box tool for multi-view reconstruction that can be easily extended. Many common algorithms for pose, feature detection and description, matching, and reconstruction have been implemented. All contain simple interfaces, limited dependencies, and extensive documentation.
 
 * Download the latest `release <https://github.com/sweeneychris/TheiaSfM>`_ or clone the
@@ -27,6 +27,15 @@ To use Theia, simply add the following line to your program after you build and
 link the library:
 
 ``#include <theia/theia.h>``
+
+After compiling and executing ``make install``, the simplest way to add and link
+the library is with the following CMake commands:
+
+.. code::
+
+  find_package(Theia REQUIRED)
+  include_directories(${THEIA_INCLUDE_DIRS})
+  target_link_libraries(my_library ${THEIA_LIBRARIES})
 
 We attempt to provide sufficient documentation but often further documentation
 can be found in the source code itself. You will likely find the API
@@ -54,19 +63,30 @@ Citation
 If you use Theia for an academic publication, please cite this
 manual. e.g., ::
 
-  @manual{theia-manual,
-          Author = {Chris Sweeney},
-          Title = {Theia Multiview Geometry Library: Tutorial \& Reference},
-          Organization = {University of California Santa Barbara.}
+  @misc{theia-manual,
+    author = {Chris Sweeney},
+    title = {Theia Multiview Geometry Library: Tutorial \& Reference},
+    howpublished = "\url{http://theia-sfm.org}",
   }
+
+When using specific algorithms that are implemented within Theia, we ask that
+you please cite the original sources. More information on which files use which
+references in the literature can be found in the header files of the relevant
+functions.
 
 ================
 Acknowledgements
 ================
 
-Theia was originally developed to provide a centralized code base to the `Four Eyes Lab <http://ilab.cs.ucsb.edu>`_ at UC Santa Barbara, but has since been expanded to an open-source project for the vision community.
+Theia was originally developed to provide a centralized code base to the `Four
+Eyes Lab <http://ilab.cs.ucsb.edu>`_ at UC Santa Barbara, but has since been
+expanded to an open-source project for the vision community.
 
-The core of the original library is written by `Chris Sweeney <http://cs.ucsb.edu/~cmsweeney>`_. Funding for Theia was provided by his advisors `Tobias Hollerer <http://cs.ucsb.edu/~holl>`_ and `Matthew Turk <http://cs.ucsb.edu/~mturk>`_ and NSF Graduate Research Fellowship Grant DGE-1144085.
+The core of the original library is written by `Chris Sweeney
+<http://homes.cs.washington.edu/~csweeney>`_. Funding for Theia was provided by his
+advisors `Tobias Hollerer <http://cs.ucsb.edu/~holl>`_ and `Matthew Turk
+<http://cs.ucsb.edu/~mturk>`_ in part by NSF Grant IIS-1219261, ONR Grant
+N00014-14-1-0133, and NSF Graduate Research Fellowship Grant DGE-1144085.
 
 .. toctree::
    :maxdepth: 3
@@ -75,6 +95,7 @@ The core of the original library is written by `Chris Sweeney <http://cs.ucsb.ed
    building
    api
    applications
+   faq
    performance
    contributions
    releases

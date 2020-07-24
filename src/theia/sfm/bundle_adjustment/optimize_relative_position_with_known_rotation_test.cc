@@ -49,33 +49,16 @@
 namespace theia {
 
 namespace {
+RandomNumberGenerator rng(52);
 
 Camera RandomCamera() {
   Camera camera;
-  camera.SetPosition(Eigen::Vector3d::Random());
-  camera.SetOrientationFromAngleAxis(0.2 * Eigen::Vector3d::Random());
+  camera.SetPosition(rng.RandVector3d());
+  camera.SetOrientationFromAngleAxis(0.2 * rng.RandVector3d());
   camera.SetImageSize(1000, 1000);
   camera.SetFocalLength(800);
-  camera.SetAspectRatio(1.0);
-  camera.SetSkew(0.0);
   camera.SetPrincipalPoint(500.0, 500.0);
   return camera;
-}
-
-void GetInverseCalibrationMatrix(const Camera& camera,
-                                 Eigen::Matrix3d* inv_calibration) {
-  Eigen::Matrix3d calibration;
-  camera.GetCalibrationMatrix(&calibration);
-  bool invertible;
-  double determinant;
-  calibration.computeInverseAndDetWithCheck(*inv_calibration,
-                                            determinant,
-                                            invertible);
-  if (!invertible) {
-    LOG(FATAL) << "Calibration matrices are ill formed. Cannot optimize "
-                  "epipolar constraints.";
-    return;
-  }
 }
 
 void GetRelativeTranslationFromCameras(const Camera& camera1,
@@ -95,10 +78,6 @@ void TestOptimization(const Camera& camera1,
                       const double kPixelNoise,
                       const double kTranslationNoise,
                       const double kTolerance) {
-  Eigen::Matrix3d inv_calibration1, inv_calibration2;
-  GetInverseCalibrationMatrix(camera1, &inv_calibration1);
-  GetInverseCalibrationMatrix(camera2, &inv_calibration2);
-
   // Project points and create feature correspondences.
   std::vector<FeatureCorrespondence> matches;
   for (int i = 0; i < world_points.size(); i++) {
@@ -106,14 +85,14 @@ void TestOptimization(const Camera& camera1,
     FeatureCorrespondence match;
     camera1.ProjectPoint(point, &match.feature1);
     camera2.ProjectPoint(point, &match.feature2);
-    AddNoiseToProjection(kPixelNoise, &match.feature1);
-    AddNoiseToProjection(kPixelNoise, &match.feature2);
+    AddNoiseToProjection(kPixelNoise, &rng, &match.feature1);
+    AddNoiseToProjection(kPixelNoise, &rng, &match.feature2);
 
     // Undo the calibration.
     match.feature1 =
-        (inv_calibration1 * match.feature1.homogeneous()).eval().hnormalized();
+        camera1.PixelToNormalizedCoordinates(match.feature1).hnormalized();
     match.feature2 =
-        (inv_calibration2 * match.feature2.homogeneous()).eval().hnormalized();
+        camera2.PixelToNormalizedCoordinates(match.feature2).hnormalized();
     matches.emplace_back(match);
   }
 
@@ -123,8 +102,11 @@ void TestOptimization(const Camera& camera1,
   const Eigen::Vector3d gt_relative_position = relative_position;
 
   // Add noise to relative translation.
-  const Eigen::AngleAxisd translation_noise(DegToRad(
-      RandGaussian(0.0, kTranslationNoise)), Eigen::Vector3d::Random());
+  const Eigen::AngleAxisd translation_noise(
+      DegToRad(rng.RandGaussian(0.0, kTranslationNoise)),
+      Eigen::Vector3d(rng.RandDouble(-1.0, 1.0),
+                      rng.RandDouble(-1.0, 1.0),
+                      rng.RandDouble(-1.0, 1.0)));
   relative_position = translation_noise * relative_position;
 
   CHECK(OptimizeRelativePositionWithKnownRotation(
@@ -150,11 +132,10 @@ TEST(OptimizeRelativePositionWithKnownRotationTest, NoNoise) {
   std::vector<Eigen::Vector3d> points(kNumPoints);
 
   // Set up random points.
-  InitRandomGenerator();
   for (int i = 0; i < kNumPoints; i++) {
-    Eigen::Vector3d point(RandDouble(-2.0, 2.0),
-                          RandDouble(-2.0, -2.0),
-                          RandDouble(8.0, 10.0));
+    Eigen::Vector3d point(rng.RandDouble(-2.0, 2.0),
+                          rng.RandDouble(-2.0, -2.0),
+                          rng.RandDouble(8.0, 10.0));
     points[i] = point;
   }
 
@@ -174,11 +155,10 @@ TEST(OptimizeRelativePositionWithKnownRotationTest, PixelNoise) {
   std::vector<Eigen::Vector3d> points(kNumPoints);
 
   // Set up random points.
-  InitRandomGenerator();
   for (int i = 0; i < kNumPoints; i++) {
-    Eigen::Vector3d point(RandDouble(-2.0, 2.0),
-                          RandDouble(-2.0, -2.0),
-                          RandDouble(8.0, 10.0));
+    Eigen::Vector3d point(rng.RandDouble(-2.0, 2.0),
+                          rng.RandDouble(-2.0, -2.0),
+                          rng.RandDouble(8.0, 10.0));
     points[i] = point;
   }
 
@@ -199,11 +179,10 @@ TEST(OptimizeRelativePositionWithKnownRotationTest, TranslationNoise) {
   std::vector<Eigen::Vector3d> points(kNumPoints);
 
   // Set up random points.
-  InitRandomGenerator();
   for (int i = 0; i < kNumPoints; i++) {
-    Eigen::Vector3d point(RandDouble(-2.0, 2.0),
-                          RandDouble(-2.0, -2.0),
-                          RandDouble(8.0, 10.0));
+    Eigen::Vector3d point(rng.RandDouble(-2.0, 2.0),
+                          rng.RandDouble(-2.0, -2.0),
+                          rng.RandDouble(8.0, 10.0));
     points[i] = point;
   }
 
@@ -224,11 +203,10 @@ TEST(OptimizeRelativePositionWithKnownRotationTest, PixelAndTranslationNoise) {
   std::vector<Eigen::Vector3d> points(kNumPoints);
 
   // Set up random points.
-  InitRandomGenerator();
   for (int i = 0; i < kNumPoints; i++) {
-    Eigen::Vector3d point(RandDouble(-2.0, 2.0),
-                          RandDouble(-2.0, -2.0),
-                          RandDouble(8.0, 10.0));
+    Eigen::Vector3d point(rng.RandDouble(-2.0, 2.0),
+                          rng.RandDouble(-2.0, -2.0),
+                          rng.RandDouble(8.0, 10.0));
     points[i] = point;
   }
 

@@ -4,14 +4,118 @@
 Releases
 ========
 
-HEAD
-====
+`0.7.0 <https://github.com/sweeneychris/TheiaSfM/archive/v0.7.tar.gz/>`_
+========================================================================
 
 New Features
 ------------
+* Camera intrinsics may be shared among multiple cameras.
+* New CameraIntrinsicsModel class allows users to specify new camera models for SfM. All camera models seamlessly integrate into Theia's pipelines.
+* PinholeRadialTangentialCameraModel, FisheyeCameraModel, and FOVCameraModel classes have been added.
+* Large restructure of camera class for increased modularity. The Camera class can now set its parameters from camera intrinsics priors, and more.
+* Image undistortion module will remove radial distortion from images and features.
+* 3d-3d alignment may now utilize weights per correspondence (thanks @nosleduc).
+* New guided matching capability (based on Rajvi Shah's work).
+* Versioning for serialization to provide backwards compatability.
+* Added the ability to specify minimum track length for triangulation.
+* AKAZE feature detector/descriptor added.
+* Remove CImg from the library and add external dependency OpenImageIO.
+* Position or orientation may be independently set to constant during BA. This is useful for Global SfM methods.
+* Thresholds for incremental SfM are now resolution independent, leading to better quality when there is a variety of image resolutions in the dataset.
+* Feature extraction is skipped if the feature file is already present. This allows us to perform matching without feature extraction during SfM.
 
 Bug Fixes
 ---------
+* Fixed c++11 detection for MSVC.
+* Many more CMake and other minor bugs for MSVC compilation (thanks to @MikePelton).
+* Fixed a bug in the localization for incremental SfM that accidentally added under-constrained images to the reconstruction.
+* Fixed a bug in the Normalized Cut module (thanks @cqd123123).
+
+Misc.
+-----
+* New RandomNumberGenerator class is used so that all randomized operations may be seeded. This gives better stability to unit tests (via fixed seeds) and allows users repeatability during SfM.
+* Unit tests for incremental reconstruction.
+* Updated the default SfM parameters for better reconstructions.
+* GPS information added to camera intrinsics priors.
+* Reconstruction normalization is no longer based on a RANSAC method and is now deterministic.
+
+`0.6.0  <https://github.com/sweeneychris/TheiaSfM/archive/v0.6.tar.gz>`_
+========================================================================
+
+New Features
+------------
+* Users can now specify which intrinsics to optimize (using bitmask operators) during bundle adjustment.
+* TrackEstimator can now estimate specific tracks (used for incremental SfM).
+* Features can be read/written from/to files.
+* Matching features can now utilize feature files (so that out-of-core matching can be done).
+* Improved SVD efficiency for the 5 point alg.
+* 2-view geometric verification takes in the 3D points for BA as input.
+* Homographies are now computed during geometric verification
+* Homography inlier count is used to choose a better initial pair for Incremental SfM.
+* Robust cost functions may now be used for Bundle Adjustment
+* Method to estimate a dominant plane from points (by bnuernberger).
+* L1 solver now uses the ADMM method. This results in problems that are generally better conditioned and are much faster at scale.
+* Reconstructions now can store and compute colors of 3D points.
+* Support for reading and writing NVM files (Visual SfM's default format).
+* Defaults polynomial solver is now Jenkins Traub method using the `RPolyPlusPlus <https://github.com/sweeneychris/RpolyPlusPlus>`_ implementation.
+* Global rotations solvers use a minimum spanning tree to initialize the global orientations.
+* Robust cost functions and camera intrinsic optimizations can be used for any type of Bundle Adjustment (not just global BA).
+* A new Quadratic Programming module that uses the ADMM method.
+* Least Unsquared Deviations position estimation uses the proper QP method for solving.
+
+Bug Fixes
+---------
+* Several bug fixes for Windows (thanks to Jonas Scheer and others).
+* 2-view BA properly holds the camera's extrinsic parameters constant.
+* No pointers are used anymore in the cascade hasher. This prevent rarely occuring segfaults.
+* Position estimation now fails when view_pairs is empty (thanks to vfragoso).
+* Cascade Hasher works properly with zero descriptors (thanks to anfractuosity).
+* Root-SIFT handles zero-norm vectors properly.
+* Cascade Hasher initializes properly (thanks to anfractuosity).
+* Robust rotations solver initializes the sparse matrix from a triplet list. This results in a dramatic speedup for large scale problems.
+
+Misc.
+-----
+* Incremental SfM will now exit early if no suitable initial pair can be found
+* Computing the maximal parallel rigid subgraph only considers views that are in the largest connected component
+* RemovesDisconnectedViewPairs now returns the views that were removed
+* Only compute HashedImages once per image (for out of core matching)
+* Triangulation algorithms return true on success properly
+* The point cloud viewer uses the dominant plane detection to set the ground plane for viewing.
+* Upgraded EasyEXIF lib to the latest version.
+* New CHOLMOD wrapper for sparse cholesky decomposition. This provides a notable performance increase for large scale problems.
+
+`0.5.0  <https://github.com/sweeneychris/TheiaSfM/archive/v0.5.tar.gz>`_
+========================================================================
+
+New Features
+------------
+* Jenkins Traub polynomial root-finding algorithm.
+* Cereal library is now used for all I/O.
+* Feature matching can now be done in-core or out-of-core.
+* Global SfM was completely refactored to be split into RotationEstimator and PositionEstimator classes. This makes implementing new algs straightforward with automatic integration.
+* Least unsquared deviations position estimator.
+* Linear rotation estimator.
+* Extract maximal parallel subgraphs to determine well-constrained positions for estimation.
+* Two point algorithm for absolute pose with known vertical direction.
+* LMeds (vfragoso).
+* Normalized graph cuts (to be used in the future for hiearchical SfM).
+* Massively updated flags files for building reconstructions.
+* Ability to specify which image pairs to match.
+
+Bug Fixes
+---------
+* Disable the unit tests for Optimo (thanks to bvanavery).
+* Tons of Windows compilation fixes.
+* Bundler file I/O fixes (thanks rajvi).
+* Fix potential divide by zeros in the RANSAC interface (thanks to klemmster).
+
+Misc.
+-----
+* Refactoring of the polynomial root-finding algorithms to make the files easier to follow.
+* Improved CMake files (thanks to Ceres authors).
+* Removed all binary descriptors. This makes the descriptor interfaces much less of a headache.
+* Updated VLFeat to the latest version.
 
 `0.4.0 <https://github.com/sweeneychris/TheiaSfM/archive/v0.4.tar.gz>`_
 =======================================================================

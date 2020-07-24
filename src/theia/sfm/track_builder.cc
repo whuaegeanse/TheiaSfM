@@ -36,6 +36,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <stdint.h>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -49,7 +50,9 @@
 
 namespace theia {
 
-TrackBuilder::TrackBuilder(const int max_track_length) : num_features_(0) {
+TrackBuilder::TrackBuilder(const int min_track_length,
+                           const int max_track_length)
+    : num_features_(0), min_track_length_(min_track_length) {
   connected_components_.reset(
       new ConnectedComponents<uint64_t>(max_track_length));
 }
@@ -75,7 +78,6 @@ void TrackBuilder::AddFeatureCorrespondence(const ViewId view_id1,
 
 void TrackBuilder::BuildTracks(Reconstruction* reconstruction) {
   CHECK_NOTNULL(reconstruction);
-  CHECK_EQ(reconstruction->NumTracks(), 0);
 
   // Build a reverse map mapping feature ids to ImageNameFeaturePairs.
   std::unordered_map<uint64_t, const std::pair<ViewId, Feature>*> id_to_feature;
@@ -89,12 +91,12 @@ void TrackBuilder::BuildTracks(Reconstruction* reconstruction) {
   connected_components_->Extract(&components);
 
   // Each connected component is a track. Add all tracks to the reconstruction.
-  int num_singleton_tracks = 0;
+  int num_small_tracks = 0;
   int num_inconsistent_features = 0;
   for (const auto& component : components) {
     // Skip singleton tracks.
-    if (component.second.size() == 1) {
-      ++num_singleton_tracks;
+    if (component.second.size() < min_track_length_) {
+      ++num_small_tracks;
       continue;
     }
 
@@ -120,12 +122,12 @@ void TrackBuilder::BuildTracks(Reconstruction* reconstruction) {
         << "Could not build tracks.";
   }
 
-  VLOG(1)
+  LOG(INFO)
       << reconstruction->NumTracks() << " tracks were created. "
       << num_inconsistent_features
       << " features were dropped because they formed inconsistent tracks, and "
-      << num_singleton_tracks
-      << " features were dropped because they formed singleton tracks.";
+      << num_small_tracks << " features were dropped because they did not have "
+                             "enough observations.";
 }
 
 uint64_t TrackBuilder::FindOrInsert(
@@ -144,7 +146,8 @@ uint64_t TrackBuilder::FindOrInsert(
   // Increment the number of features.
   ++num_features_;
 
-  return new_feature_id;;
+  return new_feature_id;
+  ;
 }
 
 }  // namespace theia

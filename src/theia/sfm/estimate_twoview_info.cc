@@ -40,15 +40,19 @@
 
 #include <vector>
 
-#include "theia/solvers/sample_consensus_estimator.h"
+#include "theia/matching/feature_correspondence.h"
+#include "theia/sfm/camera/camera.h"
 #include "theia/sfm/camera_intrinsics_prior.h"
 #include "theia/sfm/estimators/estimate_relative_pose.h"
 #include "theia/sfm/estimators/estimate_uncalibrated_relative_pose.h"
-#include "theia/matching/feature_correspondence.h"
 #include "theia/sfm/pose/util.h"
+#include "theia/sfm/reconstruction_estimator_utils.h"
+#include "theia/sfm/set_camera_intrinsics_from_priors.h"
 #include "theia/sfm/triangulation/triangulation.h"
 #include "theia/sfm/twoview_info.h"
 #include "theia/sfm/types.h"
+#include "theia/sfm/visibility_pyramid.h"
+#include "theia/solvers/sample_consensus_estimator.h"
 
 namespace theia {
 
@@ -59,58 +63,69 @@ using Eigen::Vector3d;
 
 namespace {
 
-struct CameraIntrinsics {
-  double focal_length = 1.0;
-  double principal_point[2] = {0.0, 0.0};
-  double aspect_ratio = 1.0;
-  double skew = 0.0;
-};
-
-void SetCameraIntrinsics(const CameraIntrinsicsPrior& prior,
-                         CameraIntrinsics* intrinsics) {
-  if (prior.focal_length.is_set) {
-    intrinsics->focal_length = prior.focal_length.value;
-  }
-
-  if (prior.principal_point[0].is_set && prior.principal_point[1].is_set) {
-    intrinsics->principal_point[0] = prior.principal_point[0].value;
-    intrinsics->principal_point[1] = prior.principal_point[1].value;
-  } else {
-    intrinsics->principal_point[0] = prior.image_width / 2.0;
-    intrinsics->principal_point[1] = prior.image_height / 2.0;
-  }
-
-  if (prior.aspect_ratio.is_set) {
-    intrinsics->aspect_ratio = prior.aspect_ratio.value;
-  }
-
-  if (prior.skew.is_set) {
-    intrinsics->skew = prior.skew.value;
-  }
-}
-
-void NormalizeFeature(const CameraIntrinsics& intrinsics, Vector2d* feature) {
-  feature->y() = (feature->y() - intrinsics.principal_point[1]) /
-                 (intrinsics.focal_length * intrinsics.aspect_ratio);
-  feature->x() = (feature->x() - intrinsics.skew * feature->y() -
-                  intrinsics.principal_point[0]) / intrinsics.focal_length;
-}
-
 // Normalizes the image features by the camera intrinsics.
 void NormalizeFeatures(
     const CameraIntrinsicsPrior& prior1,
     const CameraIntrinsicsPrior& prior2,
     const std::vector<FeatureCorrespondence>& correspondences,
     std::vector<FeatureCorrespondence>* normalized_correspondences) {
-  *CHECK_NOTNULL(normalized_correspondences) = correspondences;
+  CHECK_NOTNULL(normalized_correspondences)->clear();
 
-  CameraIntrinsics intrinsics1, intrinsics2;
-  SetCameraIntrinsics(prior1, &intrinsics1);
-  SetCameraIntrinsics(prior2, &intrinsics2);
-  for (int i = 0; i < correspondences.size(); i++) {
-    NormalizeFeature(intrinsics1, &normalized_correspondences->at(i).feature1);
-    NormalizeFeature(intrinsics2, &normalized_correspondences->at(i).feature2);
+  Camera camera1, camera2;
+  camera1.SetFromCameraIntrinsicsPriors(prior1);
+  camera2.SetFromCameraIntrinsicsPriors(prior2);
+  // If no focal length prior is given, the SetFromCameraIntrinsicsPrior method
+  // will set the focal length to a reasonable guess. However, for cameras with
+  // no focal length priors we DO NOT want the feature normalization below to
+  // divide by the focal length, so we must reset the focal lengths to 1.0 so
+  // that the feature normalization is unaffected.
+  if (!prior1.focal_length.is_set || !prior2.focal_length.is_set) {
+    camera1.SetFocalLength(1.0);
+    camera2.SetFocalLength(1.0);
   }
+
+  normalized_correspondences->reserve(correspondences.size());
+  for (const FeatureCorrespondence& correspondence : correspondences) {
+    FeatureCorrespondence normalized_correspondence;
+    const Eigen::Vector3d normalized_feature1 =
+        camera1.PixelToNormalizedCoordinates(correspondence.feature1);
+    normalized_correspondence.feature1 = normalized_feature1.hnormalized();
+
+    const Eigen::Vector3d normalized_feature2 =
+        camera2.PixelToNormalizedCoordinates(correspondence.feature2);
+    normalized_correspondence.feature2 = normalized_feature2.hnormalized();
+
+    normalized_correspondences->emplace_back(normalized_correspondence);
+  }
+}
+
+// Compute the visibility score of the inliers in the images.
+int ComputeVisibilityScoreOfInliers(
+    const CameraIntrinsicsPrior& intrinsics1,
+    const CameraIntrinsicsPrior& intrinsics2,
+    const std::vector<FeatureCorrespondence>& correspondences,
+    const std::vector<int>& inlier_indices) {
+  static const int kNumPyramidLevels = 6;
+  // If the image dimensions are not available, do not make any assumptions
+  // about what they might be. Instead, we return the number of inliers as a
+  // default.
+  if (intrinsics1.image_width == 0 || intrinsics1.image_height == 0 ||
+      intrinsics2.image_width == 0 || intrinsics2.image_height == 0) {
+    return inlier_indices.size();
+  }
+
+  // Compute the visibility score for all inliers.
+  VisibilityPyramid pyramid1(
+      intrinsics1.image_width, intrinsics1.image_height, kNumPyramidLevels);
+  VisibilityPyramid pyramid2(
+      intrinsics2.image_width, intrinsics2.image_height, kNumPyramidLevels);
+  for (const int i : inlier_indices) {
+    const FeatureCorrespondence& match = correspondences[i];
+    pyramid1.AddPoint(match.feature1);
+    pyramid2.AddPoint(match.feature2);
+  }
+  // Return the summed score.
+  return pyramid1.ComputeScore() + pyramid2.ComputeScore();
 }
 
 bool EstimateTwoViewInfoCalibrated(
@@ -122,19 +137,29 @@ bool EstimateTwoViewInfoCalibrated(
     std::vector<int>* inlier_indices) {
   // Normalize features w.r.t focal length.
   std::vector<FeatureCorrespondence> normalized_correspondences;
-  NormalizeFeatures(intrinsics1,
-                    intrinsics2,
-                    correspondences,
-                    &normalized_correspondences);
+  NormalizeFeatures(
+      intrinsics1, intrinsics2, correspondences, &normalized_correspondences);
 
   // Set the ransac parameters.
   RansacParameters ransac_options;
+  ransac_options.rng = options.rng;
   ransac_options.failure_probability = 1.0 - options.expected_ransac_confidence;
   ransac_options.min_iterations = options.min_ransac_iterations;
   ransac_options.max_iterations = options.max_ransac_iterations;
+
+  // Compute the sampson error threshold to account for the resolution of the
+  // images.
+  const double max_sampson_error_pixels1 =
+      ComputeResolutionScaledThreshold(options.max_sampson_error_pixels,
+                                       intrinsics1.image_width,
+                                       intrinsics1.image_height);
+  const double max_sampson_error_pixels2 =
+      ComputeResolutionScaledThreshold(options.max_sampson_error_pixels,
+                                       intrinsics2.image_width,
+                                       intrinsics2.image_height);
   ransac_options.error_thresh =
-      options.max_sampson_error_pixels * options.max_sampson_error_pixels /
-      (intrinsics1.focal_length.value * intrinsics2.focal_length.value);
+      max_sampson_error_pixels1 * max_sampson_error_pixels2 /
+      (intrinsics1.focal_length.value[0] * intrinsics2.focal_length.value[0]);
   ransac_options.use_mle = options.use_mle;
 
   RelativePose relative_pose;
@@ -152,9 +177,11 @@ bool EstimateTwoViewInfoCalibrated(
   // Set the twoview info.
   twoview_info->rotation_2 = rotation.angle() * rotation.axis();
   twoview_info->position_2 = relative_pose.position;
-  twoview_info->focal_length_1 = intrinsics1.focal_length.value;
-  twoview_info->focal_length_2 = intrinsics2.focal_length.value;
+  twoview_info->focal_length_1 = intrinsics1.focal_length.value[0];
+  twoview_info->focal_length_2 = intrinsics2.focal_length.value[0];
   twoview_info->num_verified_matches = summary.inliers.size();
+  twoview_info->visibility_score = ComputeVisibilityScoreOfInliers(
+      intrinsics1, intrinsics2, correspondences, *inlier_indices);
 
   *inlier_indices = summary.inliers;
 
@@ -170,18 +197,28 @@ bool EstimateTwoViewInfoUncalibrated(
     std::vector<int>* inlier_indices) {
   // Normalize features w.r.t principal point.
   std::vector<FeatureCorrespondence> centered_correspondences;
-  NormalizeFeatures(intrinsics1,
-                    intrinsics2,
-                    correspondences,
-                    &centered_correspondences);
+  NormalizeFeatures(
+      intrinsics1, intrinsics2, correspondences, &centered_correspondences);
 
   // Set the ransac parameters.
   RansacParameters ransac_options;
+  ransac_options.rng = options.rng;
   ransac_options.failure_probability = 1.0 - options.expected_ransac_confidence;
   ransac_options.min_iterations = options.min_ransac_iterations;
   ransac_options.max_iterations = options.max_ransac_iterations;
+
+  // Compute the sampson error threshold to account for the resolution of the
+  // images.
+  const double max_sampson_error_pixels1 =
+      ComputeResolutionScaledThreshold(options.max_sampson_error_pixels,
+                                       intrinsics1.image_width,
+                                       intrinsics1.image_height);
+  const double max_sampson_error_pixels2 =
+      ComputeResolutionScaledThreshold(options.max_sampson_error_pixels,
+                                       intrinsics2.image_width,
+                                       intrinsics2.image_height);
   ransac_options.error_thresh =
-      options.max_sampson_error_pixels * options.max_sampson_error_pixels;
+      max_sampson_error_pixels1 * max_sampson_error_pixels2;
 
   UncalibratedRelativePose relative_pose;
   RansacSummary summary;
@@ -203,6 +240,8 @@ bool EstimateTwoViewInfoUncalibrated(
 
   // Get the number of verified features.
   twoview_info->num_verified_matches = summary.inliers.size();
+  twoview_info->visibility_score = ComputeVisibilityScoreOfInliers(
+      intrinsics1, intrinsics2, correspondences, *inlier_indices);
   *inlier_indices = summary.inliers;
 
   return true;

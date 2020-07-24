@@ -38,66 +38,37 @@
 #include <theia/theia.h>
 
 #include <algorithm>
-#include <memory>
 #include <string>
-
 
 DEFINE_string(lists_file, "", "Input bundle lists file.");
 DEFINE_string(bundle_file, "", "Input bundle file.");
 DEFINE_string(output_reconstruction_file, "",
               "Output reconstruction file in binary format.");
+DEFINE_string(images_directory, "",
+              "Directory of input images. This is used to extract the "
+              "principal point and image dimensions since Bundler does not "
+              "provide those.");
 
 int main(int argc, char* argv[]) {
   google::InitGoogleLogging(argv[0]);
   THEIA_GFLAGS_NAMESPACE::ParseCommandLineFlags(&argc, &argv, true);
 
-  // Load the SIFT descriptors into the cameras.
-  std::unique_ptr<theia::Reconstruction> reconstruction(
-      new theia::Reconstruction());
+  // Load the reconstuction.
+  theia::Reconstruction reconstruction;
   CHECK(theia::ReadBundlerFiles(FLAGS_lists_file,
                                 FLAGS_bundle_file,
-                                reconstruction.get()))
+                                &reconstruction))
       << "Could not read Bundler files.";
-
-  // Check that the reprojection errors are sane.
-  int num_projections_behind_camera = 0;
-  std::vector<double> reprojection_errors;
-  for (const theia::TrackId track_id : reconstruction->TrackIds()) {
-    const theia::Track* track = CHECK_NOTNULL(reconstruction->Track(track_id));
-    for (const theia::ViewId view_id : track->ViewIds()) {
-      const theia::Feature* feature =
-          reconstruction->View(view_id)->GetFeature(track_id);
-
-      // Reproject the observations.
-      Eigen::Vector2d projection;
-      if (reconstruction->View(view_id)
-              ->Camera().ProjectPoint(track->Point(), &projection) < 0) {
-        ++num_projections_behind_camera;
-      }
-
-      // Compute reprojection error.
-      const double reprojection_error = (*feature - projection).norm();
-      reprojection_errors.emplace_back(reprojection_error);
-    }
+  if (FLAGS_images_directory.size() > 0) {
+    CHECK(theia::PopulateImageSizesAndPrincipalPoints(FLAGS_images_directory,
+                                                      &reconstruction));
+  } else {
+    LOG(INFO) << "The image directory was not provided so the principal point "
+                 "and image dimensions are assumed to be zero. Proceed with "
+                 "caution!";
   }
 
-  std::sort(reprojection_errors.begin(), reprojection_errors.end());
-  const double mean_reprojection_error =
-      std::accumulate(reprojection_errors.begin(),
-                      reprojection_errors.end(),
-                      0.0) / static_cast<double>(reprojection_errors.size());
-  const double median_reprojection_error =
-      reprojection_errors[reprojection_errors.size() / 2];
-
-  LOG(INFO) << "\nNum views: " << reconstruction->NumViews()
-            << "\nNum 3D points: " << reconstruction->NumTracks()
-            << "\nNum observations: " << reprojection_errors.size()
-            << "\nNum reprojections behind camera: "
-            << num_projections_behind_camera
-            << "\nMean reprojection error = " << mean_reprojection_error
-            << "\nMedian reprojection_error = " << median_reprojection_error;
-
-  CHECK(WriteReconstruction(*reconstruction, FLAGS_output_reconstruction_file))
+  CHECK(WriteReconstruction(reconstruction, FLAGS_output_reconstruction_file))
       << "Could not write out reconstruction file.";
   return 0;
 }

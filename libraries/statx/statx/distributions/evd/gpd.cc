@@ -33,11 +33,11 @@
 #include "statx/utils/ecdf.h"
 #include "statx/distributions/evd/gpd_mle.h"
 #include <vector>
-#ifdef WITH_CERES
+#ifdef STATX_WITH_CERES
 #include "statx/distributions/evd/gpd_ceres.h"
 #endif
 
-namespace statx {
+namespace libstatx {
 namespace distributions {
 namespace evd {
 
@@ -57,13 +57,13 @@ bool gpdfit(const vector<double>& data,
       exit_flag = gpdfit_mle(data, xi, sigma);
       break;
     case QUANTILE_NLS:
-#ifdef WITH_CERES 
+#ifdef STATX_WITH_CERES
       exit_flag = gpdfit_ceres(data, xi, sigma);
 #endif
       break;
   }
   return exit_flag;
 }
-}  // evd
-}  // distributions
-}  // statx
+}  // namespce evd
+}  // namespce distributions
+}  // namespace libstatx
